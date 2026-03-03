@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GNU social modernized</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="masthead" data-reveal>
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">g</div>
+      <div>
+        <p class="brand-overline">Federated Stream</p>
+        <h1>GNU social modern</h1>
+      </div>
+    </div>
+    <div class="status-row">
+      <span id="healthDot" class="dot pending"></span>
+      <span id="healthLabel">API status: checking...</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <aside class="rail left" data-reveal>
+      <section class="panel profile">
+        <div class="panel-header">
+          <h2>Account</h2>
+          <button id="logoutBtn" type="button" class="ghost">Logout</button>
+        </div>
+        <p id="authState" class="mono">not signed in</p>
+        <form id="loginForm" class="stacked-form">
+          <label for="loginUser">Username or Email</label>
+          <input id="loginUser" type="text" autocomplete="username">
+          <label for="loginPass">Password</label>
+          <input id="loginPass" type="password" autocomplete="current-password">
+          <button type="submit">Login</button>
+        </form>
+        <details class="register-box">
+          <summary>Create account</summary>
+          <form id="registerForm" class="stacked-form">
+            <label for="regUsername">Username</label>
+            <input id="regUsername" type="text" maxlength="30">
+            <label for="regEmail">Email</label>
+            <input id="regEmail" type="email" maxlength="120">
+            <label for="regPassword">Password</label>
+            <input id="regPassword" type="password" minlength="10">
+            <button type="submit">Register</button>
+          </form>
+        </details>
+        <p id="authMsg" class="msg"></p>
+      </section>
+
+      <section class="panel profile">
+        <div class="profile-head">
+          <div class="avatar">A</div>
+          <div>
+            <h2 id="profileName">alice</h2>
+            <p id="profileHandle" class="handle">@alice</p>
+          </div>
+        </div>
+        <p id="profileActorUrl" class="profile-url">http://localhost:8080/users/alice</p>
+        <div class="profile-stats">
+          <div><span id="statPosts">0</span><small>posts</small></div>
+          <div><span id="statFollowers">0</span><small>followers</small></div>
+          <div><span id="statFollowing">0</span><small>following</small></div>
+        </div>
+      </section>
+
+      <nav class="panel nav-panel" aria-label="Navigation">
+        <p class="panel-title">Navigation</p>
+        <ul class="nav-list">
+          <li><a href="#" class="active">Timeline</a></li>
+          <li><a href="/users/alice">Actor JSON</a></li>
+          <li><a href="/users/alice/outbox">Outbox</a></li>
+          <li><a href="/.well-known/nodeinfo">NodeInfo</a></li>
+          <li><a href="/healthz">Health</a></li>
+        </ul>
+      </nav>
+
+      <section class="panel">
+        <p class="panel-title">Follow</p>
+        <form id="followForm" class="stacked-form">
+          <label for="followTarget">Target username or actor URL</label>
+          <input id="followTarget" type="text" placeholder="alice or https://remote/users/name">
+          <div class="row">
+            <button type="submit">Follow</button>
+            <button id="unfollowBtn" type="button" class="ghost">Unfollow</button>
+          </div>
+        </form>
+        <p id="followMsg" class="msg"></p>
+      </section>
+    </aside>
+
+    <section class="feed" data-reveal>
+      <article class="panel compose">
+        <div class="panel-header">
+          <h2>New Notice</h2>
+          <span class="chip">modernized classic</span>
+        </div>
+
+        <form id="composeForm">
+          <label for="postContent">Write a post</label>
+          <textarea id="postContent" rows="5" maxlength="5000" placeholder="Share a thought with the fediverse..."></textarea>
+          <div class="controls">
+            <div>
+              <label for="visibility">Visibility</label>
+              <select id="visibility">
+                <option value="public">Public</option>
+                <option value="unlisted">Unlisted</option>
+                <option value="followers">Followers</option>
+                <option value="direct">Direct</option>
+              </select>
+            </div>
+            <div>
+              <label for="username">Posting as</label>
+              <input id="username" type="text" value="alice" maxlength="64">
+            </div>
+            <button id="postBtn" type="submit">Post</button>
+          </div>
+        </form>
+        <p id="composeMsg" class="msg"></p>
+      </article>
+
+      <article class="panel timeline">
+        <div class="panel-header timeline-head">
+          <h2>Conversation Stream</h2>
+          <div class="switch" role="tablist" aria-label="Timeline mode">
+            <button id="localBtn" class="active" type="button" role="tab" aria-selected="true">Public</button>
+            <button id="homeBtn" type="button" role="tab" aria-selected="false">Home</button>
+          </div>
+        </div>
+        <div class="timeline-actions">
+          <button id="refreshBtn" type="button">Refresh</button>
+          <span id="timelineState" class="mono">ready</span>
+        </div>
+        <ul id="timelineList" class="timeline-list"></ul>
+      </article>
+
+      <article class="panel timeline">
+        <div class="panel-header timeline-head">
+          <h2>Groups</h2>
+        </div>
+        <form id="groupCreateForm" class="stacked-form">
+          <label for="groupSlug">New group slug</label>
+          <input id="groupSlug" type="text" maxlength="40" placeholder="my-group">
+          <label for="groupTitle">Title</label>
+          <input id="groupTitle" type="text" maxlength="120" placeholder="My Group">
+          <button type="submit">Create group</button>
+        </form>
+        <form id="groupJoinForm" class="stacked-form">
+          <label for="groupJoinSlug">Join group slug</label>
+          <input id="groupJoinSlug" type="text" maxlength="40" placeholder="my-group">
+          <div class="row">
+            <button type="submit">Join</button>
+            <button id="groupLoadBtn" type="button" class="ghost">Load timeline</button>
+          </div>
+        </form>
+        <ul id="groupTimelineList" class="timeline-list"></ul>
+        <p id="groupMsg" class="msg"></p>
+      </article>
+    </section>
+
+    <aside class="rail right" data-reveal>
+      <section class="panel">
+        <p class="panel-title">Federation Checks</p>
+        <div id="checksGrid" class="checks-grid"></div>
+      </section>
+
+      <section class="panel">
+        <p class="panel-title">Node Notes</p>
+        <ul class="hint-list">
+          <li>Ctrl/Cmd+Enter posts quickly.</li>
+          <li>Public timeline reflects local notes only.</li>
+          <li>Home timeline uses fan-out timeline items.</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <p class="panel-title">Notifications</p>
+          <button id="markReadBtn" type="button" class="ghost">Mark all read</button>
+        </div>
+        <ul id="notificationList" class="timeline-list"></ul>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,660 @@
+0) Goal and guiding constraints
+
+Goal: Modern GNU social-style platform:
+
+microblog + replies + boosts + likes
+
+local groups/communities (GNU social flavor)
+
+ActivityPub federation that works with Mastodon first
+
+modern login options (email/passkeys + optional social/OIDC providers)
+
+Key constraint: Federation is a hostile internet protocol. Build it like you’d build an exposed security service: strict parsing, idempotency, SSRF defenses, rate limiting, audit logs.
+
+Why target Mastodon first: it’s the biggest ActivityPub microblog “reference implementation” in practice, and its docs tell you what actually needs to work in the wild.
+
+1) Tech choices (default)
+
+Backend: Go
+DB: Postgres
+Queue/Cache: Redis
+Media: local disk now, S3 later
+Frontend: optional later (API-first)
+
+(You can swap Go for Node/TS or Elixir; the interfaces don’t change.)
+
+2) Monorepo layout
+
+Create this structure:
+
+gnusocial-modern/
+  README.md
+  .env.example
+  docker-compose.yml
+
+  backend/
+    Dockerfile
+    go.mod
+    go.sum
+    cmd/
+      api/
+        main.go
+    internal/
+      config/
+      http/
+        router.go
+        middleware/
+          request_id.go
+          recover.go
+          rate_limit.go
+      storage/
+        postgres/
+        redis/
+      domain/
+        accounts/
+        posts/
+        follows/
+        groups/
+        moderation/
+      ap/
+        activitypub/
+          handlers/
+            webfinger.go
+            nodeinfo.go
+            actor.go
+            inbox.go
+            outbox.go
+            objects.go
+          signatures/
+            verify.go
+            sign.go
+          delivery/
+            enqueue.go
+            worker.go
+          fetch/
+            deref.go
+          models/
+            activity.go
+            actor.go
+            note.go
+      auth/
+        sessions/
+        providers/
+          google/
+          meta/
+          x/
+          tiktok/
+      jobs/
+      util/
+
+    migrations/
+      0001_init.sql
+3) Docker Compose + envs (dev)
+docker-compose.yml
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: social
+      POSTGRES_USER: social
+      POSTGRES_PASSWORD: social
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - ./.env
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8080:8080"
+    volumes:
+      - apdata:/data
+
+volumes:
+  pgdata:
+  apdata:
+.env.example
+APP_ENV=dev
+APP_BASE_URL=http://localhost:8080
+APP_DOMAIN=localhost:8080
+
+DB_DSN=postgres://social:social@db:5432/social?sslmode=disable
+REDIS_ADDR=redis:6379
+
+# ActivityPub signing keys (server-level or per-actor; start per-actor in DB)
+DATA_DIR=/data
+
+# Session/JWT
+SESSION_SECRET=change-me-long-random
+JWT_ISSUER=gnusocial-modern
+JWT_AUDIENCE=gnusocial-modern-web
+JWT_SIGNING_KEY=change-me-long-random
+
+# Optional auth providers (enable only when set)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URL=http://localhost:8080/auth/google/callback
+
+META_CLIENT_ID=
+META_CLIENT_SECRET=
+META_REDIRECT_URL=http://localhost:8080/auth/meta/callback
+
+X_CLIENT_ID=
+X_CLIENT_SECRET=
+X_REDIRECT_URL=http://localhost:8080/auth/x/callback
+
+TIKTOK_CLIENT_KEY=
+TIKTOK_CLIENT_SECRET=
+TIKTOK_REDIRECT_URL=http://localhost:8080/auth/tiktok/callback
+4) Backend Dockerfile
+
+backend/Dockerfile
+
+FROM golang:1.23-alpine AS build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /bin/api ./cmd/api
+
+FROM alpine:3.20
+WORKDIR /srv
+COPY --from=build /bin/api /usr/local/bin/api
+EXPOSE 8080
+CMD ["api"]
+5) Database schema v1 (Postgres)
+
+Create backend/migrations/0001_init.sql:
+
+-- Actors (local users + cached remote actors)
+CREATE TABLE actors (
+  id              BIGSERIAL PRIMARY KEY,
+  local           BOOLEAN NOT NULL DEFAULT TRUE,
+  username        TEXT,
+  domain          TEXT,
+  display_name    TEXT NOT NULL DEFAULT '',
+  summary         TEXT NOT NULL DEFAULT '',
+  actor_url       TEXT UNIQUE,        -- canonical ActivityPub Actor id (URL)
+  inbox_url       TEXT,
+  outbox_url      TEXT,
+  followers_url   TEXT,
+  following_url   TEXT,
+  public_key_pem  TEXT,
+  private_key_pem TEXT,               -- local only (encrypt later)
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (username, domain)
+);
+
+-- Notes (local + cached remote objects)
+CREATE TABLE notes (
+  id              BIGSERIAL PRIMARY KEY,
+  local           BOOLEAN NOT NULL DEFAULT TRUE,
+  note_url        TEXT UNIQUE,        -- canonical object id (URL)
+  actor_id        BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+  in_reply_to_url TEXT,
+  content_html    TEXT NOT NULL,
+  content_text    TEXT NOT NULL DEFAULT '',
+  visibility      TEXT NOT NULL DEFAULT 'public', -- public|unlisted|followers|direct
+  sensitive       BOOLEAN NOT NULL DEFAULT FALSE,
+  published_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_notes_actor_published ON notes(actor_id, published_at DESC);
+
+-- Follow relations (local perspective)
+CREATE TABLE follows (
+  id                   BIGSERIAL PRIMARY KEY,
+  follower_id          BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+  following_id         BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+  state                TEXT NOT NULL DEFAULT 'accepted', -- pending|accepted|rejected
+  follow_activity_url  TEXT UNIQUE, -- activity.id for Follow
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (follower_id, following_id)
+);
+
+-- Likes / Announces
+CREATE TABLE reactions (
+  id              BIGSERIAL PRIMARY KEY,
+  actor_id        BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+  note_id         BIGINT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL, -- like|announce
+  activity_url    TEXT UNIQUE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (actor_id, note_id, kind)
+);
+
+-- Home timeline fan-out table (MVP scalability)
+CREATE TABLE timeline_items (
+  user_actor_id   BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+  note_id         BIGINT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_actor_id, note_id)
+);
+CREATE INDEX idx_timeline_user_created ON timeline_items(user_actor_id, created_at DESC);
+
+-- Groups (local first)
+CREATE TABLE groups (
+  id              BIGSERIAL PRIMARY KEY,
+  local           BOOLEAN NOT NULL DEFAULT TRUE,
+  slug            TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  summary         TEXT NOT NULL DEFAULT '',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (slug)
+);
+
+CREATE TABLE group_memberships (
+  group_id        BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  actor_id        BIGINT NOT NULL REFERENCES actors(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL DEFAULT 'member', -- owner|moderator|member
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (group_id, actor_id)
+);
+
+CREATE TABLE group_posts (
+  group_id        BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  note_id         BIGINT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (group_id, note_id)
+);
+
+-- Inbox activity log (idempotency + forensic record)
+CREATE TABLE inbox_activities (
+  id              BIGSERIAL PRIMARY KEY,
+  activity_id     TEXT UNIQUE,
+  actor_url       TEXT,
+  type            TEXT,
+  raw_json        JSONB NOT NULL,
+  received_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Outbound delivery queue (retryable)
+CREATE TABLE deliveries (
+  id              BIGSERIAL PRIMARY KEY,
+  target_inbox    TEXT NOT NULL,
+  activity_id     TEXT NOT NULL,
+  activity_json   JSONB NOT NULL,
+  state           TEXT NOT NULL DEFAULT 'queued', -- queued|sent|failed
+  attempts        INT NOT NULL DEFAULT 0,
+  last_error      TEXT NOT NULL DEFAULT '',
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_deliveries_next_attempt ON deliveries(state, next_attempt_at);
+
+-- Auth: local users and external identities
+CREATE TABLE users (
+  id              BIGSERIAL PRIMARY KEY,
+  actor_id        BIGINT NOT NULL UNIQUE REFERENCES actors(id) ON DELETE CASCADE,
+  email           TEXT UNIQUE,
+  password_hash   TEXT, -- nullable if social/passkey-only
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE identities (
+  id                BIGSERIAL PRIMARY KEY,
+  user_id           BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider          TEXT NOT NULL,     -- google|meta|x|tiktok
+  provider_subject  TEXT NOT NULL,     -- stable subject/ID from provider
+  email             TEXT,
+  display_name      TEXT,
+  avatar_url        TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (provider, provider_subject)
+);
+
+-- Sessions (server-side) (optional; JWT-only is ok too)
+CREATE TABLE sessions (
+  id              TEXT PRIMARY KEY,
+  user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at      TIMESTAMPTZ NOT NULL
+);
+6) HTTP surface: endpoints you will implement (exact order)
+6.1 Discovery (must work before federation works)
+
+GET /.well-known/webfinger?resource=acct:USERNAME@DOMAIN
+Mastodon relies on WebFinger discovery.
+
+GET /.well-known/nodeinfo
+
+GET /nodeinfo/2.0 (or 2.1)
+
+6.2 Actor + collections
+
+GET /users/:username (returns ActivityPub Actor JSON)
+
+POST /users/:username/inbox (accepts activities; verify signatures; dedupe)
+
+GET /users/:username/outbox (OrderedCollection + paging)
+
+GET /users/:username/followers
+
+GET /users/:username/following
+
+6.3 Objects
+
+GET /notes/:id (Note object JSON)
+
+6.4 Local API (your app’s client uses this)
+
+POST /api/v1/posts (create local note; fan-out; enqueue Create deliveries)
+
+GET /api/v1/timelines/home
+
+GET /api/v1/timelines/local
+
+Groups (local)
+
+POST /api/v1/groups
+
+POST /api/v1/groups/:slug/join
+
+POST /api/v1/groups/:slug/posts
+
+GET /api/v1/groups/:slug/timeline
+
+6.5 Auth endpoints
+
+POST /auth/login (email/password)
+
+POST /auth/logout
+
+GET /auth/:provider/start (redirect)
+
+GET /auth/:provider/callback (code exchange, identity link, session issue)
+
+7) ActivityPub JSON shapes you must get right
+7.1 WebFinger response (minimal)
+
+Must return rel=self pointing to the Actor URL.
+
+7.2 Actor (Person)
+
+Include @context, id, preferredUsername, inbox, outbox, followers, following, and publicKey.
+
+7.3 Follow handling (critical interop)
+
+When inbox receives a Follow:
+
+verify signature
+
+dedupe by activity.id (store in inbox_activities first; conflict => return 202)
+
+create/ensure follower actor exists (remote actor cached)
+
+insert into follows as accepted (or pending if you want approval flow)
+
+send an Accept back to follower’s inbox (signed request)
+
+Mastodon expects this shape of interaction.
+
+7.4 Create Note delivery
+
+When local user posts:
+
+create Note object with stable id URL
+
+create Create activity with stable id URL
+
+deliver Create to each follower inbox (remote followers) using signed POST
+
+for local followers: also insert into timeline_items
+
+8) Security requirements (treat as build tasks)
+
+Inbox hardening
+
+Strict JSON parsing (size limits)
+
+Require id and type
+
+Dedupe by activity.id
+
+Verify HTTP Signatures for remote actors (in dev you can allow unsigned with a feature flag, but don’t “ship it”)
+
+SSRF protection for any dereference/fetch:
+
+allowlist schemes: https only
+
+block private IP ranges
+
+set timeouts, max redirects
+
+Rate limiting per IP + per actor URL
+
+Outbound hardening
+
+Sign all delivery POSTs (HTTP Signatures)
+
+Retry with exponential backoff; cap attempts
+
+Log failures with enough context to debug
+
+9) Modern auth: what “makes sense” and how to implement
+The key design decision
+
+Implement a provider adapter interface, not “4 different auth systems.”
+
+Provider interface (conceptual)
+
+AuthURL(state, pkce) -> url
+
+Exchange(code, pkce) -> token
+
+FetchProfile(token) -> {subject,email,name,avatar}
+
+Store:
+
+identities(provider, provider_subject) as the stable link
+
+Which providers and why
+
+Google: OIDC on OAuth2; clean and widely supported.
+
+Meta (Facebook): OAuth login exists; more policy/ops overhead; optional.
+
+X: OAuth2 exists; business/policy volatility risk; optional.
+
+TikTok: OAuth v2 login kit exists; usually niche unless you’re targeting creator communities.
+
+Recommended auth shipping order
+
+Email/password plus Google
+
+Add passkeys later
+
+Only add Meta/X/TikTok when you have a real reason (user demand)
+
+Implementation notes
+
+Use Authorization Code flow (PKCE for public clients; server-side can still use PKCE as defense-in-depth).
+
+Always validate state and rotate session secrets.
+
+Minimal scopes. You mostly want identity, not social graph.
+
+10) Worker: delivery queue + retry
+
+Implement internal/ap/activitypub/delivery/worker.go:
+
+Algorithm
+
+fetch N queued deliveries where next_attempt_at <= now()
+
+POST activity_json to target_inbox (signed)
+
+if 2xx => mark sent
+
+else:
+
+attempts++
+
+next_attempt_at = now() + min( (2^attempts)*30s, 6h )
+
+store last_error
+
+after attempts >= (say) 12, mark failed
+
+This is what makes federation resilient instead of “randomly flaky.”
+
+11) Groups plan (GNU social flavor, modern implementation)
+Phase A (ship early): Local groups
+
+Groups are a local feature with:
+
+membership roles (owner/mod/member)
+
+group timeline
+
+group posting API
+
+A group post is just a Note + link row in group_posts.
+
+Phase B (later): Federated groups (hard mode)
+
+represent group as an ActivityPub Actor (type: Group)
+
+group has its own inbox/outbox
+
+remote membership semantics vary across Fediverse software, so you’ll do lots of interop testing
+
+Recommendation: ship Phase A first. The product becomes useful without “federated community actors.”
+
+12) “AI agent in VS Code” step-by-step tasks (do these in order)
+Task 1 — Bootstrap API server
+
+config loader (APP_BASE_URL, DB/Redis)
+
+router + middleware (recover, request id, logging)
+
+GET /healthz
+
+Task 2 — Storage
+
+Postgres connection + migrations
+
+Redis connection
+
+Task 3 — Seed a dev local user
+
+if no local actor exists, create alice
+
+generate RSA keypair, store in actors table (private key encryption is Phase 2)
+
+Task 4 — Discovery endpoints
+
+implement WebFinger per Mastodon expectations
+
+NodeInfo endpoints
+
+Task 5 — Actor endpoint
+
+return ActivityPub Actor JSON, correct @context and publicKey
+
+Task 6 — Inbox (POST) with idempotency first
+
+accept JSON
+
+insert raw into inbox_activities by activity.id; on conflict return 202
+
+implement handlers for:
+
+Follow
+
+Undo (Follow/Like/Announce)
+
+Like
+
+Announce
+
+Create (Note)
+
+Delete (Note/Actor)
+
+Task 7 — HTTP Signatures
+
+signature verification for inbound (map keyId => actor public key)
+
+signing for outbound deliveries
+
+Task 8 — Follow → Accept loop
+
+on Follow, create follows record
+
+send Accept back to remote inbox (enqueue)
+
+Task 9 — Outbox + Note object
+
+outbox OrderedCollection paging
+
+GET /notes/:id
+
+Task 10 — Local posting API
+
+POST /api/v1/posts
+
+create Note, fan-out to local followers, enqueue Create to remote followers
+
+Task 11 — Delivery worker
+
+poll + send + retry
+
+Task 12 — Auth module
+
+email/password login (bcrypt/argon2)
+
+sessions or JWT issuance
+
+Google provider adapter first (OIDC)
+
+add Meta/X/TikTok adapters behind feature flags
+
+Task 13 — Groups (local)
+
+create/join/post/timeline endpoints
+
+moderation roles
+
+Task 14 — Moderation essentials
+
+domain blocks/limits
+
+user silence/suspend
+
+reports
+
+13) Quick test checklist (minimum viable “it federates”)
+
+WebFinger resolves acct:alice@domain to actor URL
+
+Mastodon can discover actor JSON
+
+Mastodon follow triggers inbox Follow and you reply Accept
+
+Posting locally delivers Create to remote follower inboxes
+
+Undo/Delete behave sensibly (don’t resurrect objects; keep tombstones or soft-delete)
+
+14) What not to do (common traps)
+
+Don’t fetch arbitrary URLs without SSRF controls (federation will try to trick you).
+
+Don’t rely on “spec says so” — rely on interop tests with Mastodon behavior.
+
+Don’t make groups federated until the base is stable.
+
+Don’t ship 4 social logins before you’ve shipped a working Fediverse loop.
