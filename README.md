@@ -20,6 +20,7 @@ This repository is bootstrapped with:
 - Delivery worker with retry backoff over `deliveries` queue
 - Local auth + sessions (`/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`)
 - Follow/unfollow + reactions (`/api/v1/follows`, `/api/v1/unfollow`, likes/boosts)
+- Quote posts + bookmarks + mute/block safety controls (`/api/v1/notes/:id/quote`, bookmarks, mutes, blocks)
 - Local groups API (`create/join/post/timeline`)
 - Notifications + basic moderation primitives (reports, domain policies)
 - Media upload + post attachments (`POST /api/v1/media`, attachment propagation in AP/local APIs)
@@ -64,6 +65,16 @@ Admin moderation endpoints are protected by `ADMIN_USERNAMES` (comma-separated u
 - `GET /auth/me`
 - `POST /api/v1/follows`
 - `POST /api/v1/unfollow`
+- `POST /api/v1/mutes`
+- `DELETE /api/v1/mutes`
+- `GET /api/v1/mutes`
+- `POST /api/v1/blocks`
+- `DELETE /api/v1/blocks`
+- `GET /api/v1/blocks`
+- `GET /api/v1/bookmarks`
+- `POST /api/v1/notes/:id/quote`
+- `POST /api/v1/notes/:id/bookmark`
+- `DELETE /api/v1/notes/:id/bookmark`
 - `POST /api/v1/media`
 - `GET /api/v1/settings/theme`
 - `PUT /api/v1/settings/theme`

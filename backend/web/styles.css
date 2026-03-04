@@ -449,6 +449,14 @@ button {
   flex: 1;
 }
 
+.timeline-item .row {
+  flex-wrap: wrap;
+}
+
+.timeline-item .row button {
+  flex: 0 0 auto;
+}
+
 .register-box {
   margin-top: 0.5rem;
 }
@@ -576,6 +584,11 @@ button:disabled {
   border-radius: var(--radius-md);
   background: rgba(11, 16, 24, 0.64);
   padding: 0.44rem 0.5rem;
+}
+
+.quoted-note {
+  margin-top: 0.45rem;
+  border-color: rgba(109, 182, 255, 0.35);
 }
 
 .check-head {

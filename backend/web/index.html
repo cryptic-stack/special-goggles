@@ -30,6 +30,8 @@
     <button type="button" class="menu-link active" data-menu-target="timelinePanel">Timeline</button>
     <button type="button" class="menu-link" data-menu-target="composePanel">Compose</button>
     <button type="button" class="menu-link" data-menu-target="groupsPanel">Groups</button>
+    <button type="button" class="menu-link" data-menu-target="bookmarksPanel">Bookmarks</button>
+    <button type="button" class="menu-link" data-menu-target="safetyPanel">Safety</button>
     <button type="button" class="menu-link" data-menu-target="notificationsPanel">Notifications</button>
     <button type="button" class="menu-link" data-menu-target="themePanel">Theme</button>
     <button type="button" class="menu-link" data-menu-target="checksPanel">Federation</button>
@@ -91,6 +93,8 @@
           <button type="button" class="nav-btn active" data-menu-target="timelinePanel">Timeline</button>
           <button type="button" class="nav-btn" data-menu-target="composePanel">Compose</button>
           <button type="button" class="nav-btn" data-menu-target="groupsPanel">Groups</button>
+          <button type="button" class="nav-btn" data-menu-target="bookmarksPanel">Bookmarks</button>
+          <button type="button" class="nav-btn" data-menu-target="safetyPanel">Safety</button>
           <button type="button" class="nav-btn" data-menu-target="notificationsPanel">Notifications</button>
           <button type="button" class="nav-btn" data-menu-target="themePanel">Theme</button>
           <button type="button" class="nav-btn" data-menu-target="checksPanel">Federation</button>
@@ -121,6 +125,27 @@
           </div>
         </form>
         <p id="followMsg" class="msg"></p>
+      </section>
+
+      <section id="safetyPanel" class="panel">
+        <p class="panel-title">Safety Controls</p>
+        <form id="safetyForm" class="stacked-form">
+          <label for="safetyTarget">Target username or actor URL</label>
+          <input id="safetyTarget" type="text" placeholder="alice or https://remote/users/name">
+          <div class="row">
+            <button id="muteBtn" type="button" class="ghost">Mute</button>
+            <button id="unmuteBtn" type="button" class="ghost">Unmute</button>
+          </div>
+          <div class="row">
+            <button id="blockBtn" type="button">Block</button>
+            <button id="unblockBtn" type="button" class="ghost">Unblock</button>
+          </div>
+        </form>
+        <p id="safetyMsg" class="msg"></p>
+        <p class="panel-title compact">Muted</p>
+        <ul id="muteList" class="hint-list"></ul>
+        <p class="panel-title compact">Blocked</p>
+        <ul id="blockList" class="hint-list"></ul>
       </section>
 
       <section id="themePanel" class="panel">
@@ -241,6 +266,14 @@
     </section>
 
     <aside class="rail right" data-reveal>
+      <section id="bookmarksPanel" class="panel">
+        <div class="panel-header">
+          <p class="panel-title">Bookmarks</p>
+          <button id="bookmarksRefreshBtn" type="button" class="ghost">Refresh</button>
+        </div>
+        <ul id="bookmarkList" class="timeline-list"></ul>
+      </section>
+
       <section id="checksPanel" class="panel">
         <p class="panel-title">Federation Checks</p>
         <div id="checksGrid" class="checks-grid"></div>

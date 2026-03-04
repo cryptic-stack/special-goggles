@@ -54,6 +54,16 @@ const elements = {
   unfollowBtn: document.getElementById("unfollowBtn"),
   followMsg: document.getElementById("followMsg"),
 
+  safetyForm: document.getElementById("safetyForm"),
+  safetyTarget: document.getElementById("safetyTarget"),
+  muteBtn: document.getElementById("muteBtn"),
+  unmuteBtn: document.getElementById("unmuteBtn"),
+  blockBtn: document.getElementById("blockBtn"),
+  unblockBtn: document.getElementById("unblockBtn"),
+  safetyMsg: document.getElementById("safetyMsg"),
+  muteList: document.getElementById("muteList"),
+  blockList: document.getElementById("blockList"),
+
   themeForm: document.getElementById("themeForm"),
   themePreset: document.getElementById("themePreset"),
   themeFont: document.getElementById("themeFont"),
@@ -86,6 +96,8 @@ const elements = {
   checksGrid: document.getElementById("checksGrid"),
   notificationList: document.getElementById("notificationList"),
   markReadBtn: document.getElementById("markReadBtn"),
+  bookmarkList: document.getElementById("bookmarkList"),
+  bookmarksRefreshBtn: document.getElementById("bookmarksRefreshBtn"),
 
   menuTargetButtons: Array.from(document.querySelectorAll("[data-menu-target]")),
   menuActionButtons: Array.from(document.querySelectorAll("[data-menu-action]")),
@@ -172,6 +184,10 @@ function init() {
 
   elements.followForm.addEventListener("submit", onFollow);
   elements.unfollowBtn.addEventListener("click", onUnfollow);
+  elements.muteBtn.addEventListener("click", onMute);
+  elements.unmuteBtn.addEventListener("click", onUnmute);
+  elements.blockBtn.addEventListener("click", onBlock);
+  elements.unblockBtn.addEventListener("click", onUnblock);
 
   elements.themeForm.addEventListener("submit", onSaveTheme);
   elements.themeApplyBtn.addEventListener("click", onApplyTheme);
@@ -189,6 +205,8 @@ function init() {
   elements.groupLoadBtn.addEventListener("click", onLoadGroupTimeline);
 
   elements.markReadBtn.addEventListener("click", onMarkRead);
+  elements.bookmarksRefreshBtn.addEventListener("click", loadBookmarks);
+  elements.bookmarkList.addEventListener("click", onBookmarkAction);
   elements.menuToggle.addEventListener("click", onMenuToggle);
   for (const button of elements.menuTargetButtons) {
     button.addEventListener("click", onMenuTarget);
@@ -208,7 +226,15 @@ async function refreshAll() {
   await loadAuthState();
   syncFederationLinks();
   resetTimelinePaging(state.timeline);
-  await Promise.all([loadThemeSettings(), loadChecks(), loadProfile(), loadTimeline(true), loadNotifications()]);
+  await Promise.all([
+    loadThemeSettings(),
+    loadChecks(),
+    loadProfile(),
+    loadTimeline(true),
+    loadNotifications(),
+    loadBookmarks(),
+    loadSafetyLists(),
+  ]);
 }
 
 async function checkHealth() {
@@ -237,6 +263,7 @@ async function loadAuthState() {
     elements.loginForm.style.display = "none";
     elements.registerForm.style.display = "none";
     setThemeControlsEnabled(true);
+    setSafetyControlsEnabled(true);
   } catch {
     state.authenticated = false;
     syncFederationLinks();
@@ -244,6 +271,7 @@ async function loadAuthState() {
     elements.loginForm.style.display = "";
     elements.registerForm.style.display = "";
     setThemeControlsEnabled(false);
+    setSafetyControlsEnabled(false);
   }
 }
 
@@ -496,6 +524,92 @@ function setFollowMessage(text, isError) {
   elements.followMsg.className = `msg ${isError ? "error" : "ok"}`;
 }
 
+async function onMute() {
+  await onSafetyChange("mutes", "POST", "Muted account.");
+}
+
+async function onUnmute() {
+  await onSafetyChange("mutes", "DELETE", "Unmuted account.");
+}
+
+async function onBlock() {
+  await onSafetyChange("blocks", "POST", "Blocked account.");
+}
+
+async function onUnblock() {
+  await onSafetyChange("blocks", "DELETE", "Unblocked account.");
+}
+
+async function onSafetyChange(resource, method, okMessage) {
+  const target = elements.safetyTarget.value.trim();
+  if (!target) {
+    setSafetyMessage("Target required.", true);
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/v1/${resource}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ target }),
+    });
+    if (!res.ok) {
+      throw new Error(await safeErrorText(res));
+    }
+    setSafetyMessage(okMessage, false);
+    resetTimelinePaging(state.timeline);
+    await Promise.all([loadTimeline(true), loadNotifications(), loadSafetyLists()]);
+  } catch (err) {
+    setSafetyMessage(`${resource.slice(0, -1)} failed: ${err.message}`, true);
+  }
+}
+
+function setSafetyMessage(text, isError) {
+  elements.safetyMsg.textContent = text;
+  elements.safetyMsg.className = `msg ${isError ? "error" : "ok"}`;
+}
+
+async function loadSafetyLists() {
+  if (!state.authenticated) {
+    elements.muteList.innerHTML = "<li>Sign in to view muted accounts.</li>";
+    elements.blockList.innerHTML = "<li>Sign in to view blocked accounts.</li>";
+    return;
+  }
+  try {
+    const [muteRes, blockRes] = await Promise.all([
+      fetch("/api/v1/mutes", { credentials: "same-origin" }),
+      fetch("/api/v1/blocks", { credentials: "same-origin" }),
+    ]);
+    if (!muteRes.ok || !blockRes.ok) {
+      throw new Error("failed to load safety lists");
+    }
+    const mutePayload = await muteRes.json();
+    const blockPayload = await blockRes.json();
+    renderActorRelationList(elements.muteList, Array.isArray(mutePayload.items) ? mutePayload.items : [], "No muted accounts.");
+    renderActorRelationList(elements.blockList, Array.isArray(blockPayload.items) ? blockPayload.items : [], "No blocked accounts.");
+  } catch (err) {
+    elements.muteList.innerHTML = `<li>${escapeHTML(err.message)}</li>`;
+    elements.blockList.innerHTML = `<li>${escapeHTML(err.message)}</li>`;
+  }
+}
+
+function renderActorRelationList(node, items, emptyText) {
+  node.innerHTML = "";
+  if (items.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = emptyText;
+    node.appendChild(li);
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement("li");
+    const handle = item.username ? `@${item.username}` : String(item.actor_url || "remote actor");
+    li.textContent = handle;
+    node.appendChild(li);
+  }
+}
+
 function setThemeControlsEnabled(enabled) {
   const disabled = !enabled;
   elements.themePreset.disabled = disabled;
@@ -509,6 +623,16 @@ function setThemeControlsEnabled(enabled) {
   elements.themeApplyBtn.disabled = disabled;
   elements.themeResetBtn.disabled = disabled;
   elements.themeSaveBtn.disabled = disabled;
+}
+
+function setSafetyControlsEnabled(enabled) {
+  const disabled = !enabled;
+  elements.safetyTarget.disabled = disabled;
+  elements.muteBtn.disabled = disabled;
+  elements.unmuteBtn.disabled = disabled;
+  elements.blockBtn.disabled = disabled;
+  elements.unblockBtn.disabled = disabled;
+  elements.bookmarksRefreshBtn.disabled = disabled;
 }
 
 async function loadThemeSettings() {
@@ -894,22 +1018,46 @@ function renderTimeline(items, append) {
     const published = item.published_at ? formatDate(item.published_at) : "-";
     const body = item.content_text || item.content_html || "";
     const noteID = Number(item.id);
+    const target = String(item.actor_url || "").trim() || username;
     const attachmentHTML = renderAttachmentLinks(item.attachments);
+    const quotedHTML = renderQuotedNote(item.quoted_note);
     li.innerHTML = `
       <div class="meta">
         <span>@${escapeHTML(username)}</span>
         <time>${escapeHTML(published)}</time>
       </div>
       <div class="content">${escapeHTML(body)}</div>
+      ${quotedHTML}
       ${attachmentHTML}
       <div class="row">
         <button type="button" data-action="like" data-id="${noteID}">Like</button>
         <button type="button" data-action="boost" data-id="${noteID}">Boost</button>
+        <button type="button" class="ghost" data-action="quote" data-id="${noteID}">Quote</button>
+        <button type="button" class="ghost" data-action="bookmark" data-id="${noteID}">Bookmark</button>
+        <button type="button" class="ghost" data-action="mute" data-target="${escapeHTML(target)}">Mute</button>
+        <button type="button" class="ghost" data-action="block" data-target="${escapeHTML(target)}">Block</button>
         <button type="button" class="ghost" data-action="delete" data-id="${noteID}">Delete</button>
       </div>
     `;
     elements.timelineList.appendChild(li);
   }
+}
+
+function renderQuotedNote(rawQuote) {
+  const quote = rawQuote && typeof rawQuote === "object" ? rawQuote : null;
+  if (!quote) {
+    return "";
+  }
+  const username = quote.username ? `@${quote.username}` : "quoted post";
+  const content = quote.content || "";
+  return `
+    <article class="check-card quoted-note">
+      <div class="meta">
+        <span>${escapeHTML(username)}</span>
+      </div>
+      <div class="content">${escapeHTML(content)}</div>
+    </article>
+  `;
 }
 
 function renderAttachmentLinks(rawAttachments) {
@@ -952,16 +1100,39 @@ function maybeAutoloadTimeline() {
 async function onTimelineAction(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
-  const noteID = Number(button.dataset.id);
-  if (!Number.isFinite(noteID) || noteID <= 0) return;
   const action = button.dataset.action;
 
   try {
+    if (action === "mute" || action === "block") {
+      const target = String(button.dataset.target || "").trim();
+      if (!target) {
+        throw new Error("missing target");
+      }
+      const resource = action === "mute" ? "mutes" : "blocks";
+      await fetchWithJSON(`/api/v1/${resource}`, "POST", { target });
+      setSafetyMessage(action === "mute" ? "Muted account." : "Blocked account.", false);
+      resetTimelinePaging(state.timeline);
+      await Promise.all([loadTimeline(true), loadSafetyLists(), loadNotifications()]);
+      return;
+    }
+
+    const noteID = Number(button.dataset.id);
+    if (!Number.isFinite(noteID) || noteID <= 0) return;
+
     if (action === "like") await postAction(`/api/v1/notes/${noteID}/like`, "POST");
     if (action === "boost") await postAction(`/api/v1/notes/${noteID}/boost`, "POST");
     if (action === "delete") await postAction(`/api/v1/posts/${noteID}`, "DELETE");
+    if (action === "bookmark") await postAction(`/api/v1/notes/${noteID}/bookmark`, "POST");
+    if (action === "quote") {
+      const content = prompt("Add text to your quote post (optional):");
+      if (content === null) {
+        return;
+      }
+      await fetchWithJSON(`/api/v1/notes/${noteID}/quote`, "POST", { content, visibility: elements.visibility.value });
+    }
+
     resetTimelinePaging(state.timeline);
-    await Promise.all([loadTimeline(true), loadNotifications()]);
+    await Promise.all([loadTimeline(true), loadNotifications(), loadBookmarks()]);
   } catch (err) {
     setTimelineState(`action failed: ${err.message}`);
   }
@@ -1059,6 +1230,63 @@ function renderGroupTimeline(items) {
 function setGroupMessage(text, isError) {
   elements.groupMsg.textContent = text;
   elements.groupMsg.className = `msg ${isError ? "error" : "ok"}`;
+}
+
+async function loadBookmarks() {
+  if (!state.authenticated) {
+    elements.bookmarkList.innerHTML = "<li class=\"timeline-item\">Sign in to view bookmarks.</li>";
+    return;
+  }
+  try {
+    const res = await fetch("/api/v1/bookmarks?limit=25", { credentials: "same-origin" });
+    if (!res.ok) throw new Error(await safeErrorText(res));
+    const payload = await res.json();
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    renderBookmarks(items);
+  } catch (err) {
+    elements.bookmarkList.innerHTML = `<li class="timeline-item">Failed: ${escapeHTML(err.message)}</li>`;
+  }
+}
+
+function renderBookmarks(items) {
+  elements.bookmarkList.innerHTML = "";
+  if (items.length === 0) {
+    elements.bookmarkList.innerHTML = "<li class=\"timeline-item\">No bookmarks yet.</li>";
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement("li");
+    li.className = "timeline-item";
+    const body = item.content_text || item.content_html || "";
+    li.innerHTML = `
+      <div class="meta">
+        <span>@${escapeHTML(item.username || "unknown")}</span>
+        <time>${escapeHTML(formatDate(item.published_at || ""))}</time>
+      </div>
+      <div class="content">${escapeHTML(body)}</div>
+      <div class="row">
+        <button type="button" class="ghost" data-action="bookmark-remove" data-id="${Number(item.id || 0)}">Remove</button>
+      </div>
+    `;
+    elements.bookmarkList.appendChild(li);
+  }
+}
+
+async function onBookmarkAction(event) {
+  const button = event.target.closest("button[data-action='bookmark-remove']");
+  if (!button) return;
+  const noteID = Number(button.dataset.id);
+  if (!Number.isFinite(noteID) || noteID <= 0) return;
+  try {
+    const res = await fetch(`/api/v1/notes/${noteID}/bookmark`, {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
+    if (!res.ok) throw new Error(await safeErrorText(res));
+    await loadBookmarks();
+  } catch (err) {
+    setTimelineState(`bookmark remove failed: ${err.message}`);
+  }
 }
 
 async function loadNotifications() {
@@ -1171,6 +1399,19 @@ function escapeHTML(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+async function fetchWithJSON(path, method, payload) {
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    throw new Error(await safeErrorText(res));
+  }
+  return res;
 }
 
 async function safeErrorText(res) {

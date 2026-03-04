@@ -218,6 +218,13 @@ WHERE f.following_id = $1
 			return
 		}
 
+		type followerTarget struct {
+			id       int64
+			local    bool
+			inboxURL string
+			actorURL string
+		}
+		followers := make([]followerTarget, 0, 16)
 		for rows.Next() {
 			var followerID int64
 			var followerLocal bool
@@ -229,39 +236,48 @@ WHERE f.following_id = $1
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
 				return
 			}
-
-			if followerLocal {
+			followers = append(followers, followerTarget{
+				id:       followerID,
+				local:    followerLocal,
+				inboxURL: inboxURL,
+				actorURL: followerActorURL,
+			})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			deps.Logger.Error("iterate followers failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
+			return
+		}
+		activityJSON, err := json.Marshal(createActivity)
+		if err != nil {
+			deps.Logger.Error("marshal create activity failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
+			return
+		}
+		for _, follower := range followers {
+			if follower.local {
 				if _, err := tx.Exec(r.Context(), `
 INSERT INTO timeline_items (user_actor_id, note_id)
 VALUES ($1, $2)
 ON CONFLICT DO NOTHING
 `,
-					followerID, noteID,
+					follower.id,
+					noteID,
 				); err != nil {
-					rows.Close()
-					deps.Logger.Error("insert follower timeline item failed", "error", err, "follower_id", followerID, "note_id", noteID)
+					deps.Logger.Error("insert follower timeline item failed", "error", err, "follower_id", follower.id, "note_id", noteID)
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
 					return
 				}
 				continue
 			}
-
-			targetInbox := strings.TrimSpace(inboxURL)
-			if targetInbox == "" && followerActorURL != "" {
-				targetInbox = strings.TrimRight(followerActorURL, "/") + "/inbox"
+			targetInbox := strings.TrimSpace(follower.inboxURL)
+			if targetInbox == "" && follower.actorURL != "" {
+				targetInbox = strings.TrimRight(follower.actorURL, "/") + "/inbox"
 			}
 			if targetInbox == "" {
 				continue
 			}
-
-			activityJSON, err := json.Marshal(createActivity)
-			if err != nil {
-				rows.Close()
-				deps.Logger.Error("marshal create activity failed", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
-				return
-			}
-
 			if _, err := tx.Exec(r.Context(), `
 INSERT INTO deliveries (target_inbox, activity_id, activity_json)
 VALUES ($1, $2, $3)
@@ -270,17 +286,10 @@ VALUES ($1, $2, $3)
 				createActivityID,
 				activityJSON,
 			); err != nil {
-				rows.Close()
 				deps.Logger.Error("enqueue remote delivery failed", "error", err, "target_inbox", targetInbox)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
 				return
 			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			deps.Logger.Error("iterate followers failed", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
-			return
 		}
 
 		if err := tx.Commit(r.Context()); err != nil {
@@ -323,6 +332,18 @@ JOIN notes n ON n.id = t.note_id
 JOIN actors a ON a.id = n.actor_id
 WHERE t.user_actor_id = $1
   AND ($2 = 0 OR n.id < $2)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM blocks bl
+    WHERE (bl.actor_id = $1 AND bl.target_actor_id = n.actor_id)
+       OR (bl.actor_id = n.actor_id AND bl.target_actor_id = $1)
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM mutes m
+    WHERE m.actor_id = $1
+      AND m.target_actor_id = n.actor_id
+  )
 ORDER BY t.created_at DESC, n.id DESC
 LIMIT $3
 `,
@@ -343,6 +364,10 @@ func handleLocalTimeline(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := timelineLimit(r.URL.Query().Get("limit"))
 		maxID := timelineMaxID(r.URL.Query().Get("max_id"))
+		viewerID := int64(0)
+		if viewer, err := resolveLocalActor(r, deps); err == nil {
+			viewerID = viewer.ID
+		}
 		rows, err := deps.PG.Query(r.Context(), `
 SELECT
   n.id,
@@ -356,11 +381,28 @@ FROM notes n
 JOIN actors a ON a.id = n.actor_id
 WHERE n.local = TRUE
   AND ($1 = 0 OR n.id < $1)
+  AND (
+    $3 = 0 OR NOT EXISTS (
+      SELECT 1
+      FROM blocks bl
+      WHERE (bl.actor_id = $3 AND bl.target_actor_id = n.actor_id)
+         OR (bl.actor_id = n.actor_id AND bl.target_actor_id = $3)
+    )
+  )
+  AND (
+    $3 = 0 OR NOT EXISTS (
+      SELECT 1
+      FROM mutes m
+      WHERE m.actor_id = $3
+        AND m.target_actor_id = n.actor_id
+    )
+  )
 ORDER BY n.published_at DESC, n.id DESC
 LIMIT $2
 `,
 			maxID,
 			limit+1,
+			viewerID,
 		)
 		if err != nil {
 			deps.Logger.Error("query local timeline failed", "error", err)
@@ -500,8 +542,12 @@ func writeTimelineRows(ctx context.Context, w http.ResponseWriter, deps Dependen
 		if err != nil {
 			attachments = []map[string]any{}
 		}
+		quotedNote, err := loadQuotedNoteSummary(ctx, deps, noteID)
+		if err != nil {
+			quotedNote = nil
+		}
 
-		items = append(items, map[string]any{
+		item := map[string]any{
 			"id":           noteID,
 			"note_url":     noteURL,
 			"content_html": contentHTML,
@@ -510,7 +556,11 @@ func writeTimelineRows(ctx context.Context, w http.ResponseWriter, deps Dependen
 			"actor_url":    actorURL,
 			"username":     username,
 			"attachments":  attachments,
-		})
+		}
+		if quotedNote != nil {
+			item["quoted_note"] = quotedNote
+		}
+		items = append(items, item)
 		nextMaxID = noteID
 	}
 	if err := rows.Err(); err != nil {
@@ -642,4 +692,45 @@ ORDER BY m.id ASC
 		return nil, err
 	}
 	return items, nil
+}
+
+func loadQuotedNoteSummary(ctx context.Context, deps Dependencies, noteID int64) (map[string]any, error) {
+	var (
+		quotedID      int64
+		quotedNoteURL string
+		quotedText    string
+		quotedUser    string
+		quotedActor   string
+	)
+	err := deps.PG.QueryRow(ctx, `
+SELECT
+  q.id,
+  COALESCE(q.note_url, ''),
+  COALESCE(NULLIF(q.content_text, ''), q.content_html, ''),
+  COALESCE(a.username, ''),
+  COALESCE(a.actor_url, '')
+FROM notes n
+JOIN notes q ON q.id = n.quote_note_id
+JOIN actors a ON a.id = q.actor_id
+WHERE n.id = $1
+`,
+		noteID,
+	).Scan(&quotedID, &quotedNoteURL, &quotedText, &quotedUser, &quotedActor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if quotedNoteURL == "" {
+		quotedNoteURL = strings.TrimRight(deps.Config.AppBaseURL, "/") + "/notes/" + strconv.FormatInt(quotedID, 10)
+	}
+	return map[string]any{
+		"id":         quotedID,
+		"note_url":   quotedNoteURL,
+		"content":    quotedText,
+		"username":   quotedUser,
+		"actor_url":  quotedActor,
+		"is_deleted": false,
+	}, nil
 }
