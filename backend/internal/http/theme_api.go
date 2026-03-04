@@ -28,10 +28,11 @@ var (
 		"ok":          {},
 	}
 	allowedThemePresets = map[string]struct{}{
-		"forest":   {},
-		"midnight": {},
-		"sunset":   {},
-		"custom":   {},
+		"gnusocial": {},
+		"forest":    {},
+		"midnight":  {},
+		"sunset":    {},
+		"custom":    {},
 	}
 	allowedThemeOptionValues = map[string]map[string]struct{}{
 		"font": {
@@ -184,7 +185,7 @@ LIMIT 1
 	).Scan(&preset, &variablesRaw, &optionsRaw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return themeSettingsResponse{
-			Preset:    "forest",
+			Preset:    "gnusocial",
 			Variables: map[string]string{},
 			Options:   defaultThemeOptions(),
 		}, nil
@@ -195,7 +196,7 @@ LIMIT 1
 
 	preset, err = normalizeThemePreset(preset)
 	if err != nil {
-		preset = "forest"
+		preset = "gnusocial"
 	}
 
 	var variables map[string]string
@@ -222,7 +223,7 @@ LIMIT 1
 func normalizeThemePreset(raw string) (string, error) {
 	preset := strings.ToLower(strings.TrimSpace(raw))
 	if preset == "" {
-		preset = "forest"
+		preset = "gnusocial"
 	}
 	if _, ok := allowedThemePresets[preset]; !ok {
 		return "", errors.New("invalid_theme_preset")

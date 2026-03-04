@@ -2,7 +2,7 @@ const state = {
   timeline: "local",
   username: "alice",
   authenticated: false,
-  themePreset: "forest",
+  themePreset: "gnusocial",
   themeOverrides: {},
   themeOptions: {
     font: "modern",
@@ -18,6 +18,7 @@ const state = {
 const elements = {
   healthDot: document.getElementById("healthDot"),
   healthLabel: document.getElementById("healthLabel"),
+  menuToggle: document.getElementById("menuToggle"),
 
   authState: document.getElementById("authState"),
   authMsg: document.getElementById("authMsg"),
@@ -36,6 +37,8 @@ const elements = {
   statPosts: document.getElementById("statPosts"),
   statFollowers: document.getElementById("statFollowers"),
   statFollowing: document.getElementById("statFollowing"),
+  navActorLink: document.getElementById("navActorLink"),
+  navOutboxLink: document.getElementById("navOutboxLink"),
 
   composeForm: document.getElementById("composeForm"),
   postContent: document.getElementById("postContent"),
@@ -83,9 +86,26 @@ const elements = {
   checksGrid: document.getElementById("checksGrid"),
   notificationList: document.getElementById("notificationList"),
   markReadBtn: document.getElementById("markReadBtn"),
+
+  menuTargetButtons: Array.from(document.querySelectorAll("[data-menu-target]")),
+  menuActionButtons: Array.from(document.querySelectorAll("[data-menu-action]")),
 };
 
 const themePresets = {
+  gnusocial: {
+    bg: "#0f141d",
+    paper: "#1a2330",
+    "paper-soft": "#141c28",
+    line: "#2c3949",
+    "line-strong": "#3d4f65",
+    text: "#e2eaf5",
+    muted: "#9fb0c8",
+    brand: "#6db6ff",
+    "brand-deep": "#3d83d8",
+    "brand-cool": "#31b7c7",
+    warn: "#ff7b7b",
+    ok: "#4fcf92",
+  },
   forest: {
     bg: "#edf1ea",
     paper: "#ffffff",
@@ -136,6 +156,7 @@ const themeDefaultOptions = {
   density: "comfortable",
   corner: "soft",
 };
+const defaultThemePreset = "gnusocial";
 
 init();
 
@@ -168,8 +189,16 @@ function init() {
   elements.groupLoadBtn.addEventListener("click", onLoadGroupTimeline);
 
   elements.markReadBtn.addEventListener("click", onMarkRead);
+  elements.menuToggle.addEventListener("click", onMenuToggle);
+  for (const button of elements.menuTargetButtons) {
+    button.addEventListener("click", onMenuTarget);
+  }
+  for (const button of elements.menuActionButtons) {
+    button.addEventListener("click", onMenuAction);
+  }
 
-  applyTheme("forest", {}, themeDefaultOptions);
+  applyTheme(defaultThemePreset, {}, themeDefaultOptions);
+  syncFederationLinks();
   syncThemeInputsWithActiveTheme();
   refreshAll();
 }
@@ -177,6 +206,7 @@ function init() {
 async function refreshAll() {
   await checkHealth();
   await loadAuthState();
+  syncFederationLinks();
   resetTimelinePaging(state.timeline);
   await Promise.all([loadThemeSettings(), loadChecks(), loadProfile(), loadTimeline(true), loadNotifications()]);
 }
@@ -201,6 +231,7 @@ async function loadAuthState() {
     state.authenticated = true;
     state.username = payload.actor.username;
     elements.username.value = state.username;
+    syncFederationLinks();
     elements.authState.textContent = `signed in as @${payload.actor.username}`;
     elements.authState.className = "mono";
     elements.loginForm.style.display = "none";
@@ -208,6 +239,7 @@ async function loadAuthState() {
     setThemeControlsEnabled(true);
   } catch {
     state.authenticated = false;
+    syncFederationLinks();
     elements.authState.textContent = "not signed in";
     elements.loginForm.style.display = "";
     elements.registerForm.style.display = "";
@@ -292,6 +324,7 @@ function onUsernameChange() {
     return;
   }
   state.username = elements.username.value.trim() || "alice";
+  syncFederationLinks();
   loadProfile();
 }
 
@@ -480,7 +513,7 @@ function setThemeControlsEnabled(enabled) {
 
 async function loadThemeSettings() {
   if (!state.authenticated) {
-    state.themePreset = "forest";
+    state.themePreset = defaultThemePreset;
     state.themeOverrides = {};
     state.themeOptions = { ...themeDefaultOptions };
     applyTheme(state.themePreset, state.themeOverrides, state.themeOptions);
@@ -530,10 +563,10 @@ function onApplyTheme() {
 }
 
 function onResetTheme() {
-  state.themePreset = "forest";
+  state.themePreset = defaultThemePreset;
   state.themeOverrides = {};
   state.themeOptions = { ...themeDefaultOptions };
-  applyTheme("forest", {}, state.themeOptions);
+  applyTheme(defaultThemePreset, {}, state.themeOptions);
   syncThemeInputsWithActiveTheme();
   setThemeMessage("Theme reset.", false);
 }
@@ -583,7 +616,7 @@ function normalizeThemePresetName(raw) {
   if (themePresets[preset] || preset === "custom") {
     return preset;
   }
-  return "forest";
+  return defaultThemePreset;
 }
 
 function sanitizeThemeOverridePayload(raw) {
@@ -655,7 +688,7 @@ function normalizeColorValue(raw) {
 }
 
 function resolveThemeVariables(preset, overrides) {
-  const basePreset = themePresets[preset] || themePresets.forest;
+  const basePreset = themePresets[preset] || themePresets[defaultThemePreset];
   return {
     ...basePreset,
     ...overrides,
@@ -680,13 +713,82 @@ function applyThemeOptions(options) {
 function syncThemeInputsWithActiveTheme() {
   elements.themePreset.value = state.themePreset;
   const active = resolveThemeVariables(state.themePreset, state.themeOverrides);
-  elements.themeBg.value = active.bg || themePresets.forest.bg;
-  elements.themePaper.value = active.paper || themePresets.forest.paper;
-  elements.themeText.value = active.text || themePresets.forest.text;
-  elements.themeBrand.value = active.brand || themePresets.forest.brand;
+  elements.themeBg.value = active.bg || themePresets[defaultThemePreset].bg;
+  elements.themePaper.value = active.paper || themePresets[defaultThemePreset].paper;
+  elements.themeText.value = active.text || themePresets[defaultThemePreset].text;
+  elements.themeBrand.value = active.brand || themePresets[defaultThemePreset].brand;
   elements.themeFont.value = state.themeOptions.font || themeDefaultOptions.font;
   elements.themeDensity.value = state.themeOptions.density || themeDefaultOptions.density;
   elements.themeCorner.value = state.themeOptions.corner || themeDefaultOptions.corner;
+}
+
+function syncFederationLinks() {
+  const username = encodeURIComponent(state.username || "alice");
+  if (elements.navActorLink) {
+    elements.navActorLink.href = `/users/${username}`;
+  }
+  if (elements.navOutboxLink) {
+    elements.navOutboxLink.href = `/users/${username}/outbox`;
+  }
+}
+
+function onMenuToggle() {
+  document.body.classList.toggle("menu-open");
+}
+
+function onMenuTarget(event) {
+  const target = String(event.currentTarget?.dataset?.menuTarget || "").trim();
+  if (!target) {
+    return;
+  }
+  event.preventDefault();
+  focusSection(target);
+}
+
+function onMenuAction(event) {
+  const action = String(event.currentTarget?.dataset?.menuAction || "").trim();
+  if (!action) {
+    return;
+  }
+  event.preventDefault();
+
+  if (action === "timeline:local") {
+    switchTimeline("local");
+    focusSection("timelinePanel", false);
+    return;
+  }
+  if (action === "timeline:home") {
+    switchTimeline("home");
+    focusSection("timelinePanel", false);
+    return;
+  }
+  if (action === "refresh") {
+    refreshAll();
+    closeMenuOnMobile();
+  }
+}
+
+function focusSection(sectionID, smooth = true) {
+  const node = document.getElementById(sectionID);
+  if (!node) {
+    return;
+  }
+  setActiveMenuTarget(sectionID);
+  node.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  closeMenuOnMobile();
+}
+
+function setActiveMenuTarget(sectionID) {
+  for (const button of elements.menuTargetButtons) {
+    const active = button.dataset.menuTarget === sectionID;
+    button.classList.toggle("active", active);
+  }
+}
+
+function closeMenuOnMobile() {
+  if (window.matchMedia("(max-width: 900px)").matches) {
+    document.body.classList.remove("menu-open");
+  }
 }
 
 function switchTimeline(type) {

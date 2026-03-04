@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GNU social modernized</title>
+  <title>GNU social modernized dark</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -17,15 +17,31 @@
         <h1>GNU social modern</h1>
       </div>
     </div>
-    <div class="status-row">
-      <span id="healthDot" class="dot pending"></span>
-      <span id="healthLabel">API status: checking...</span>
+    <div class="mast-actions">
+      <div class="status-row">
+        <span id="healthDot" class="dot pending"></span>
+        <span id="healthLabel">API status: checking...</span>
+      </div>
+      <button id="menuToggle" type="button" class="ghost menu-toggle" aria-label="Toggle menu">Menu</button>
     </div>
   </header>
 
+  <nav class="main-menu" aria-label="Main menu" data-reveal>
+    <button type="button" class="menu-link active" data-menu-target="timelinePanel">Timeline</button>
+    <button type="button" class="menu-link" data-menu-target="composePanel">Compose</button>
+    <button type="button" class="menu-link" data-menu-target="groupsPanel">Groups</button>
+    <button type="button" class="menu-link" data-menu-target="notificationsPanel">Notifications</button>
+    <button type="button" class="menu-link" data-menu-target="themePanel">Theme</button>
+    <button type="button" class="menu-link" data-menu-target="checksPanel">Federation</button>
+    <span class="menu-divider" aria-hidden="true"></span>
+    <button type="button" class="menu-link subtle" data-menu-action="timeline:local">Local</button>
+    <button type="button" class="menu-link subtle" data-menu-action="timeline:home">Home</button>
+    <button type="button" class="menu-link subtle" data-menu-action="refresh">Refresh</button>
+  </nav>
+
   <main class="shell">
     <aside class="rail left" data-reveal>
-      <section class="panel profile">
+      <section id="accountPanel" class="panel profile">
         <div class="panel-header">
           <h2>Account</h2>
           <button id="logoutBtn" type="button" class="ghost">Logout</button>
@@ -53,7 +69,7 @@
         <p id="authMsg" class="msg"></p>
       </section>
 
-      <section class="panel profile">
+      <section id="profilePanel" class="panel profile">
         <div class="profile-head">
           <div class="avatar">A</div>
           <div>
@@ -69,18 +85,32 @@
         </div>
       </section>
 
-      <nav class="panel nav-panel" aria-label="Navigation">
-        <p class="panel-title">Navigation</p>
-        <ul class="nav-list">
-          <li><a href="#" class="active">Timeline</a></li>
-          <li><a href="/users/alice">Actor JSON</a></li>
-          <li><a href="/users/alice/outbox">Outbox</a></li>
+      <nav id="menuPanel" class="panel nav-panel" aria-label="Navigation">
+        <p class="panel-title">Menu</p>
+        <div class="nav-grid">
+          <button type="button" class="nav-btn active" data-menu-target="timelinePanel">Timeline</button>
+          <button type="button" class="nav-btn" data-menu-target="composePanel">Compose</button>
+          <button type="button" class="nav-btn" data-menu-target="groupsPanel">Groups</button>
+          <button type="button" class="nav-btn" data-menu-target="notificationsPanel">Notifications</button>
+          <button type="button" class="nav-btn" data-menu-target="themePanel">Theme</button>
+          <button type="button" class="nav-btn" data-menu-target="checksPanel">Federation</button>
+        </div>
+        <p class="panel-title compact">Timeline mode</p>
+        <div class="row nav-row">
+          <button type="button" class="ghost" data-menu-action="timeline:local">Local</button>
+          <button type="button" class="ghost" data-menu-action="timeline:home">Home</button>
+          <button type="button" class="ghost" data-menu-action="refresh">Refresh</button>
+        </div>
+        <p class="panel-title compact">Federation links</p>
+        <ul class="hint-list nav-links">
+          <li><a id="navActorLink" href="/users/alice">Actor JSON</a></li>
+          <li><a id="navOutboxLink" href="/users/alice/outbox">Outbox</a></li>
           <li><a href="/.well-known/nodeinfo">NodeInfo</a></li>
           <li><a href="/healthz">Health</a></li>
         </ul>
       </nav>
 
-      <section class="panel">
+      <section id="followPanel" class="panel">
         <p class="panel-title">Follow</p>
         <form id="followForm" class="stacked-form">
           <label for="followTarget">Target username or actor URL</label>
@@ -93,11 +123,12 @@
         <p id="followMsg" class="msg"></p>
       </section>
 
-      <section class="panel">
+      <section id="themePanel" class="panel">
         <p class="panel-title">Theme</p>
         <form id="themeForm" class="stacked-form">
           <label for="themePreset">Preset</label>
           <select id="themePreset">
+            <option value="gnusocial">GNU social dark</option>
             <option value="forest">Forest</option>
             <option value="midnight">Midnight</option>
             <option value="sunset">Sunset</option>
@@ -138,7 +169,7 @@
     </aside>
 
     <section class="feed" data-reveal>
-      <article class="panel compose">
+      <article id="composePanel" class="panel compose">
         <div class="panel-header">
           <h2>New Notice</h2>
           <span class="chip">modernized classic</span>
@@ -170,7 +201,7 @@
         <p id="composeMsg" class="msg"></p>
       </article>
 
-      <article class="panel timeline">
+      <article id="timelinePanel" class="panel timeline">
         <div class="panel-header timeline-head">
           <h2>Conversation Stream</h2>
           <div class="switch" role="tablist" aria-label="Timeline mode">
@@ -185,7 +216,7 @@
         <ul id="timelineList" class="timeline-list"></ul>
       </article>
 
-      <article class="panel timeline">
+      <article id="groupsPanel" class="panel timeline">
         <div class="panel-header timeline-head">
           <h2>Groups</h2>
         </div>
@@ -210,12 +241,12 @@
     </section>
 
     <aside class="rail right" data-reveal>
-      <section class="panel">
+      <section id="checksPanel" class="panel">
         <p class="panel-title">Federation Checks</p>
         <div id="checksGrid" class="checks-grid"></div>
       </section>
 
-      <section class="panel">
+      <section id="notesPanel" class="panel">
         <p class="panel-title">Node Notes</p>
         <ul class="hint-list">
           <li>Ctrl/Cmd+Enter posts quickly.</li>
@@ -224,7 +255,7 @@
         </ul>
       </section>
 
-      <section class="panel">
+      <section id="notificationsPanel" class="panel">
         <div class="panel-header">
           <p class="panel-title">Notifications</p>
           <button id="markReadBtn" type="button" class="ghost">Mark all read</button>

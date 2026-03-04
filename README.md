@@ -24,7 +24,7 @@ This repository is bootstrapped with:
 - Notifications + basic moderation primitives (reports, domain policies)
 - Media upload + post attachments (`POST /api/v1/media`, attachment propagation in AP/local APIs)
 - Per-user custom theme settings (`GET/PUT /api/v1/settings/theme`) including colors, font style, density, and corner style
-- Modernized web UI wired to auth, posting, follows, groups, and notifications
+- Modernized dark web UI with GNU social-inspired layout, functional menu actions, and endless timelines
 
 ## Quick start
 
@@ -86,3 +86,7 @@ Admin moderation endpoints are protected by `ADMIN_USERNAMES` (comma-separated u
 
 - In `APP_ENV=prod`, the API rejects localhost/loopback host access.
 - In `APP_ENV=prod`, requests must target `APP_DOMAIN` (or forwarded host via `X-Forwarded-Host`).
+
+## Gap analysis
+
+- See `GAP_ANALYSIS.md` for current feature parity and implementation priorities.

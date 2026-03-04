@@ -17,8 +17,8 @@ func TestNormalizeThemePreset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for empty preset: %v", err)
 	}
-	if preset != "forest" {
-		t.Fatalf("expected default preset forest, got %q", preset)
+	if preset != "gnusocial" {
+		t.Fatalf("expected default preset gnusocial, got %q", preset)
 	}
 
 	if _, err := normalizeThemePreset("unknown"); err == nil {
