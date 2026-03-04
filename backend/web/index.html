@@ -104,6 +104,8 @@
         <form id="composeForm">
           <label for="postContent">Write a post</label>
           <textarea id="postContent" rows="5" maxlength="5000" placeholder="Share a thought with the fediverse..."></textarea>
+          <label for="mediaInput">Attach media</label>
+          <input id="mediaInput" type="file" multiple>
           <div class="controls">
             <div>
               <label for="visibility">Visibility</label>
@@ -120,6 +122,7 @@
             </div>
             <button id="postBtn" type="submit">Post</button>
           </div>
+          <p id="mediaMsg" class="mono"></p>
         </form>
         <p id="composeMsg" class="msg"></p>
       </article>

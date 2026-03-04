@@ -32,6 +32,8 @@ const elements = {
 
   composeForm: document.getElementById("composeForm"),
   postContent: document.getElementById("postContent"),
+  mediaInput: document.getElementById("mediaInput"),
+  mediaMsg: document.getElementById("mediaMsg"),
   visibility: document.getElementById("visibility"),
   username: document.getElementById("username"),
   postBtn: document.getElementById("postBtn"),
@@ -72,6 +74,7 @@ function init() {
   elements.username.addEventListener("input", onUsernameChange);
   elements.composeForm.addEventListener("submit", onSubmitPost);
   elements.postContent.addEventListener("keydown", onComposerKeydown);
+  elements.mediaInput.addEventListener("change", onMediaSelectionChange);
 
   elements.followForm.addEventListener("submit", onFollow);
   elements.unfollowBtn.addEventListener("click", onUnfollow);
@@ -266,14 +269,17 @@ async function onSubmitPost(event) {
   elements.postBtn.disabled = true;
   setComposeMessage("Publishing...", false);
   try {
+    const attachmentIDs = await uploadSelectedMedia();
     const res = await fetch("/api/v1/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ content, visibility }),
+      body: JSON.stringify({ content, visibility, attachment_ids: attachmentIDs }),
     });
     if (!res.ok) throw new Error(await safeErrorText(res));
     elements.postContent.value = "";
+    elements.mediaInput.value = "";
+    onMediaSelectionChange();
     setComposeMessage("Published.", false);
     resetTimelinePaging(state.timeline);
     await Promise.all([loadProfile(), loadTimeline(true), loadChecks(), loadNotifications()]);
@@ -282,6 +288,44 @@ async function onSubmitPost(event) {
   } finally {
     elements.postBtn.disabled = false;
   }
+}
+
+function onMediaSelectionChange() {
+  const files = Array.from(elements.mediaInput.files || []);
+  if (files.length === 0) {
+    elements.mediaMsg.textContent = "";
+    return;
+  }
+  const totalBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+  const totalMB = (totalBytes / (1024 * 1024)).toFixed(2);
+  elements.mediaMsg.textContent = `${files.length} file(s) selected, ${totalMB} MB`;
+}
+
+async function uploadSelectedMedia() {
+  const files = Array.from(elements.mediaInput.files || []);
+  if (files.length === 0) {
+    return [];
+  }
+
+  setComposeMessage("Uploading media...", false);
+  const form = new FormData();
+  for (const file of files) {
+    form.append("file", file, file.name);
+  }
+
+  const res = await fetch("/api/v1/media", {
+    method: "POST",
+    credentials: "same-origin",
+    body: form,
+  });
+  if (!res.ok) {
+    throw new Error(await safeErrorText(res));
+  }
+  const payload = await res.json();
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  return items
+    .map((item) => Number(item.id || 0))
+    .filter((id) => Number.isFinite(id) && id > 0);
 }
 
 function setComposeMessage(text, isError) {
@@ -440,12 +484,14 @@ function renderTimeline(items, append) {
     const published = item.published_at ? formatDate(item.published_at) : "-";
     const body = item.content_text || item.content_html || "";
     const noteID = Number(item.id);
+    const attachmentHTML = renderAttachmentLinks(item.attachments);
     li.innerHTML = `
       <div class="meta">
         <span>@${escapeHTML(username)}</span>
         <time>${escapeHTML(published)}</time>
       </div>
       <div class="content">${escapeHTML(body)}</div>
+      ${attachmentHTML}
       <div class="row">
         <button type="button" data-action="like" data-id="${noteID}">Like</button>
         <button type="button" data-action="boost" data-id="${noteID}">Boost</button>
@@ -454,6 +500,28 @@ function renderTimeline(items, append) {
     `;
     elements.timelineList.appendChild(li);
   }
+}
+
+function renderAttachmentLinks(rawAttachments) {
+  const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
+  if (attachments.length === 0) {
+    return "";
+  }
+
+  const links = attachments.map((attachment) => {
+    const url = escapeHTML(String(attachment.url || ""));
+    const name = escapeHTML(String(attachment.original_name || attachment.name || "attachment"));
+    if (!url) {
+      return "";
+    }
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${name}</a>`;
+  }).filter(Boolean);
+
+  if (links.length === 0) {
+    return "";
+  }
+
+  return `<div class="attachments">${links.join(" ")}</div>`;
 }
 
 function onTimelineScroll() {

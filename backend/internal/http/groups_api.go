@@ -346,6 +346,6 @@ LIMIT $3
 		}
 		defer rows.Close()
 
-		writeTimelineRows(w, rows, limit)
+		writeTimelineRows(r.Context(), w, deps, rows, limit)
 	}
 }

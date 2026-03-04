@@ -40,3 +40,27 @@ func TestIsLocalhostLikeHost(t *testing.T) {
 		t.Fatal("public domain should not be localhost-like")
 	}
 }
+
+func TestSplitCSV(t *testing.T) {
+	t.Parallel()
+
+	got := splitCSV("alice, bob ,,CAROL ")
+	if len(got) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(got))
+	}
+	if got[0] != "alice" || got[1] != "bob" || got[2] != "carol" {
+		t.Fatalf("unexpected splitCSV result: %#v", got)
+	}
+}
+
+func TestIsAdminUsername(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{AdminUsernames: []string{"alice", "bob"}}
+	if !cfg.IsAdminUsername("alice") {
+		t.Fatal("alice should be admin")
+	}
+	if cfg.IsAdminUsername("carol") {
+		t.Fatal("carol should not be admin")
+	}
+}

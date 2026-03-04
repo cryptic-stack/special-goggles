@@ -426,6 +426,23 @@ button:disabled {
   line-height: 1.34;
 }
 
+.attachments {
+  margin-top: 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.attachments a {
+  font-size: 0.78rem;
+  text-decoration: none;
+  color: var(--brand-cool);
+  border: 1px solid var(--line);
+  background: var(--paper-soft);
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+}
+
 .checks-grid {
   display: grid;
   gap: 0.5rem;

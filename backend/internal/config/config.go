@@ -33,6 +33,7 @@ type Config struct {
 	RateLimitBurst int
 
 	DevSeedPassword string
+	AdminUsernames  []string
 }
 
 func Load() (Config, error) {
@@ -55,6 +56,7 @@ func Load() (Config, error) {
 		RateLimitRPS:           getEnvFloat("RATE_LIMIT_RPS", 10),
 		RateLimitBurst:         getEnvInt("RATE_LIMIT_BURST", 30),
 		DevSeedPassword:        getEnv("DEV_SEED_PASSWORD", "alice12345"),
+		AdminUsernames:         splitCSV(getEnv("ADMIN_USERNAMES", "alice")),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -228,4 +230,30 @@ func getEnvBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.ToLower(strings.TrimSpace(part))
+		if item == "" {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func (c Config) IsAdminUsername(username string) bool {
+	username = strings.ToLower(strings.TrimSpace(username))
+	if username == "" {
+		return false
+	}
+	for _, candidate := range c.AdminUsernames {
+		if candidate == username {
+			return true
+		}
+	}
+	return false
 }

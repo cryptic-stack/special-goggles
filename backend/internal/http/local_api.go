@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,10 +24,11 @@ type localActor struct {
 }
 
 type createPostRequest struct {
-	Content    string `json:"content"`
-	InReplyTo  string `json:"in_reply_to"`
-	Visibility string `json:"visibility"`
-	Sensitive  bool   `json:"sensitive"`
+	Content       string  `json:"content"`
+	InReplyTo     string  `json:"in_reply_to"`
+	Visibility    string  `json:"visibility"`
+	Sensitive     bool    `json:"sensitive"`
+	AttachmentIDs []int64 `json:"attachment_ids"`
 }
 
 func handleCreatePost(deps Dependencies) http.HandlerFunc {
@@ -75,6 +77,12 @@ func handleCreatePost(deps Dependencies) http.HandlerFunc {
 		}
 		if visibility != "public" && visibility != "unlisted" && visibility != "followers" && visibility != "direct" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid visibility"})
+			return
+		}
+
+		attachmentIDs, err := normalizeAttachmentIDs(payload.AttachmentIDs)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 
@@ -147,6 +155,39 @@ RETURNING id, published_at
 				"to":           []string{"https://www.w3.org/ns/activitystreams#Public"},
 				"cc":           []string{actor.FollowersURL},
 			},
+		}
+
+		if len(attachmentIDs) > 0 {
+			attachments, err := loadOwnedAttachments(r.Context(), tx, actor.ID, attachmentIDs, deps.Config.AppBaseURL)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+
+			if len(attachments) != len(attachmentIDs) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "attachment_not_found_or_not_owned"})
+				return
+			}
+
+			for _, attachmentID := range attachmentIDs {
+				if _, err := tx.Exec(r.Context(), `
+INSERT INTO note_attachments (note_id, attachment_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`,
+					noteID,
+					attachmentID,
+				); err != nil {
+					deps.Logger.Error("insert note attachment failed", "error", err, "note_id", noteID, "attachment_id", attachmentID)
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
+					return
+				}
+			}
+
+			createActivityObject, ok := createActivity["object"].(map[string]any)
+			if ok {
+				createActivityObject["attachment"] = attachments
+			}
 		}
 
 		if _, err := tx.Exec(r.Context(), `
@@ -253,6 +294,7 @@ VALUES ($1, $2, $3)
 			"note_url":    noteURL,
 			"activity_id": createActivityID,
 			"published":   publishedAt.UTC().Format(time.RFC3339),
+			"attachments": attachmentIDs,
 		})
 	}
 }
@@ -293,7 +335,7 @@ LIMIT $3
 		}
 		defer rows.Close()
 
-		writeTimelineRows(w, rows, limit)
+		writeTimelineRows(r.Context(), w, deps, rows, limit)
 	}
 }
 
@@ -327,7 +369,7 @@ LIMIT $2
 		}
 		defer rows.Close()
 
-		writeTimelineRows(w, rows, limit)
+		writeTimelineRows(r.Context(), w, deps, rows, limit)
 	}
 }
 
@@ -426,7 +468,7 @@ func timelineMaxID(raw string) int64 {
 	return maxID
 }
 
-func writeTimelineRows(w http.ResponseWriter, rows interface {
+func writeTimelineRows(ctx context.Context, w http.ResponseWriter, deps Dependencies, rows interface {
 	Next() bool
 	Scan(dest ...any) error
 	Err() error
@@ -454,6 +496,11 @@ func writeTimelineRows(w http.ResponseWriter, rows interface {
 			break
 		}
 
+		attachments, err := loadNoteAttachments(ctx, deps, noteID)
+		if err != nil {
+			attachments = []map[string]any{}
+		}
+
 		items = append(items, map[string]any{
 			"id":           noteID,
 			"note_url":     noteURL,
@@ -462,6 +509,7 @@ func writeTimelineRows(w http.ResponseWriter, rows interface {
 			"published_at": published.UTC().Format(time.RFC3339),
 			"actor_url":    actorURL,
 			"username":     username,
+			"attachments":  attachments,
 		})
 		nextMaxID = noteID
 	}
@@ -478,4 +526,120 @@ func writeTimelineRows(w http.ResponseWriter, rows interface {
 		payload["next_max_id"] = nextMaxID
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func normalizeAttachmentIDs(rawIDs []int64) ([]int64, error) {
+	if len(rawIDs) == 0 {
+		return nil, nil
+	}
+	if len(rawIDs) > 8 {
+		return nil, errors.New("too_many_attachments")
+	}
+
+	seen := make(map[int64]struct{}, len(rawIDs))
+	ids := make([]int64, 0, len(rawIDs))
+	for _, id := range rawIDs {
+		if id <= 0 {
+			return nil, errors.New("invalid_attachment_id")
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func loadOwnedAttachments(ctx context.Context, tx pgx.Tx, actorID int64, attachmentIDs []int64, baseURL string) ([]map[string]any, error) {
+	if len(attachmentIDs) == 0 {
+		return nil, nil
+	}
+
+	rows, err := tx.Query(ctx, `
+SELECT id, storage_key, content_type, COALESCE(original_name, '')
+FROM media_attachments
+WHERE actor_id = $1
+  AND id = ANY($2)
+`,
+		actorID,
+		attachmentIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byID := make(map[int64]map[string]any, len(attachmentIDs))
+	for rows.Next() {
+		var (
+			id          int64
+			storageKey  string
+			contentType string
+			original    string
+		)
+		if err := rows.Scan(&id, &storageKey, &contentType, &original); err != nil {
+			return nil, err
+		}
+		byID[id] = map[string]any{
+			"type":      "Document",
+			"mediaType": contentType,
+			"url":       mediaURL(baseURL, storageKey),
+			"name":      original,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	items := make([]map[string]any, 0, len(attachmentIDs))
+	for _, id := range attachmentIDs {
+		item, ok := byID[id]
+		if !ok {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func loadNoteAttachments(ctx context.Context, deps Dependencies, noteID int64) ([]map[string]any, error) {
+	rows, err := deps.PG.Query(ctx, `
+SELECT m.id, m.storage_key, m.content_type, COALESCE(m.original_name, ''), m.byte_size
+FROM note_attachments na
+JOIN media_attachments m ON m.id = na.attachment_id
+WHERE na.note_id = $1
+ORDER BY m.id ASC
+`,
+		noteID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]map[string]any, 0, 2)
+	for rows.Next() {
+		var (
+			id          int64
+			storageKey  string
+			contentType string
+			original    string
+			byteSize    int64
+		)
+		if err := rows.Scan(&id, &storageKey, &contentType, &original, &byteSize); err != nil {
+			return nil, err
+		}
+		items = append(items, map[string]any{
+			"id":            id,
+			"url":           mediaURL(deps.Config.AppBaseURL, storageKey),
+			"content_type":  contentType,
+			"original_name": original,
+			"byte_size":     byteSize,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

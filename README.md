@@ -22,6 +22,7 @@ This repository is bootstrapped with:
 - Follow/unfollow + reactions (`/api/v1/follows`, `/api/v1/unfollow`, likes/boosts)
 - Local groups API (`create/join/post/timeline`)
 - Notifications + basic moderation primitives (reports, domain policies)
+- Media upload + post attachments (`POST /api/v1/media`, attachment propagation in AP/local APIs)
 - Modernized web UI wired to auth, posting, follows, groups, and notifications
 
 ## Quick start
@@ -52,6 +53,7 @@ username: alice
 password: alice12345
 ```
 You can change this with `DEV_SEED_PASSWORD` in `.env`.
+Admin moderation endpoints are protected by `ADMIN_USERNAMES` (comma-separated usernames).
 
 ## API surface (new)
 
@@ -61,6 +63,7 @@ You can change this with `DEV_SEED_PASSWORD` in `.env`.
 - `GET /auth/me`
 - `POST /api/v1/follows`
 - `POST /api/v1/unfollow`
+- `POST /api/v1/media`
 - `POST /api/v1/notes/:id/like`
 - `DELETE /api/v1/notes/:id/like`
 - `POST /api/v1/notes/:id/boost`

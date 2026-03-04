@@ -79,6 +79,30 @@ func TestIsUniqueViolation(t *testing.T) {
 	}
 }
 
+func TestIsAllowedMediaType(t *testing.T) {
+	t.Parallel()
+
+	if !isAllowedMediaType("image/png") {
+		t.Fatal("image/png should be allowed")
+	}
+	if !isAllowedMediaType("application/pdf") {
+		t.Fatal("application/pdf should be allowed")
+	}
+	if isAllowedMediaType("application/javascript") {
+		t.Fatal("application/javascript should not be allowed")
+	}
+}
+
+func TestMediaURL(t *testing.T) {
+	t.Parallel()
+
+	got := mediaURL("http://localhost:8080/", "123/abc.png")
+	want := "http://localhost:8080/media/123/abc.png"
+	if got != want {
+		t.Fatalf("mediaURL mismatch: got %q want %q", got, want)
+	}
+}
+
 func assertErr(message string) error {
 	return &testErr{message: message}
 }

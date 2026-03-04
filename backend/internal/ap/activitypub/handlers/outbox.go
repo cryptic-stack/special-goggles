@@ -84,6 +84,9 @@ func Outbox(deps Dependencies) http.Handler {
 			if note.InReplyTo != "" {
 				noteObj["inReplyTo"] = note.InReplyTo
 			}
+			if attachments, err := noteAttachments(r.Context(), deps.PG, deps.Config.AppBaseURL, note.ID); err == nil && len(attachments) > 0 {
+				noteObj["attachment"] = attachments
+			}
 
 			items = append(items, map[string]any{
 				"id":        noteID + "/activities/create",

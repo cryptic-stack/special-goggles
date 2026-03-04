@@ -89,6 +89,10 @@ WHERE n.id = $1
 			activity["inReplyTo"] = inReplyTo
 		}
 
+		if attachments, err := noteAttachments(r.Context(), deps.PG, deps.Config.AppBaseURL, noteID); err == nil && len(attachments) > 0 {
+			activity["attachment"] = attachments
+		}
+
 		writeActivityJSON(w, http.StatusOK, activity)
 	})
 }

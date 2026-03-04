@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	aphandlers "github.com/cryptic-stack/special-goggles/backend/internal/ap/activitypub/handlers"
 	"github.com/cryptic-stack/special-goggles/backend/internal/config"
@@ -44,6 +45,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.Handle("GET /auth/me", handleAuthMe(deps))
 
 	mux.Handle("POST /api/v1/posts", handleCreatePost(deps))
+	mux.Handle("POST /api/v1/media", handleUploadMedia(deps))
 	mux.Handle("DELETE /api/v1/posts/{id}", handleDeleteOwnPost(deps))
 	mux.Handle("GET /api/v1/timelines/home", handleHomeTimeline(deps))
 	mux.Handle("GET /api/v1/timelines/local", handleLocalTimeline(deps))
@@ -60,8 +62,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.Handle("POST /api/v1/groups/{slug}/posts", handleCreateGroupPost(deps))
 	mux.Handle("GET /api/v1/groups/{slug}/timeline", handleGroupTimeline(deps))
 	mux.Handle("POST /api/v1/reports", handleCreateReport(deps))
-	mux.Handle("GET /api/v1/admin/reports", handleListReports(deps))
-	mux.Handle("PUT /api/v1/admin/domain-policies", handleSetDomainPolicy(deps))
+	mux.Handle("GET /api/v1/admin/reports", requireAdmin(deps, handleListReports(deps)))
+	mux.Handle("PUT /api/v1/admin/domain-policies", requireAdmin(deps, handleSetDomainPolicy(deps)))
+	mux.Handle("GET /media/", http.StripPrefix("/media/", http.FileServer(http.Dir(filepath.Join(deps.Config.DataDir, "media")))))
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web"))))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		const indexPath = "web/index.html"
