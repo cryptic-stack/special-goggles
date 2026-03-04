@@ -4,6 +4,11 @@ const state = {
   authenticated: false,
   themePreset: "forest",
   themeOverrides: {},
+  themeOptions: {
+    font: "modern",
+    density: "comfortable",
+    corner: "soft",
+  },
   timelinePaging: {
     local: { nextMaxID: 0, hasMore: true, loading: false, initialized: false },
     home: { nextMaxID: 0, hasMore: true, loading: false, initialized: false },
@@ -48,6 +53,9 @@ const elements = {
 
   themeForm: document.getElementById("themeForm"),
   themePreset: document.getElementById("themePreset"),
+  themeFont: document.getElementById("themeFont"),
+  themeDensity: document.getElementById("themeDensity"),
+  themeCorner: document.getElementById("themeCorner"),
   themeBg: document.getElementById("themeBg"),
   themePaper: document.getElementById("themePaper"),
   themeText: document.getElementById("themeText"),
@@ -123,6 +131,11 @@ const themePresets = {
 };
 
 const themeEditableKeys = ["bg", "paper", "text", "brand"];
+const themeDefaultOptions = {
+  font: "modern",
+  density: "comfortable",
+  corner: "soft",
+};
 
 init();
 
@@ -156,7 +169,7 @@ function init() {
 
   elements.markReadBtn.addEventListener("click", onMarkRead);
 
-  applyTheme("forest", {});
+  applyTheme("forest", {}, themeDefaultOptions);
   syncThemeInputsWithActiveTheme();
   refreshAll();
 }
@@ -453,6 +466,9 @@ function setFollowMessage(text, isError) {
 function setThemeControlsEnabled(enabled) {
   const disabled = !enabled;
   elements.themePreset.disabled = disabled;
+  elements.themeFont.disabled = disabled;
+  elements.themeDensity.disabled = disabled;
+  elements.themeCorner.disabled = disabled;
   elements.themeBg.disabled = disabled;
   elements.themePaper.disabled = disabled;
   elements.themeText.disabled = disabled;
@@ -466,7 +482,8 @@ async function loadThemeSettings() {
   if (!state.authenticated) {
     state.themePreset = "forest";
     state.themeOverrides = {};
-    applyTheme(state.themePreset, state.themeOverrides);
+    state.themeOptions = { ...themeDefaultOptions };
+    applyTheme(state.themePreset, state.themeOverrides, state.themeOptions);
     syncThemeInputsWithActiveTheme();
     setThemeMessage("Sign in to save a personal theme.", false);
     return;
@@ -480,9 +497,11 @@ async function loadThemeSettings() {
     const payload = await res.json();
     const preset = normalizeThemePresetName(payload.preset);
     const overrides = sanitizeThemeOverridePayload(payload.variables);
+    const options = sanitizeThemeOptionPayload(payload.options);
     state.themePreset = preset;
     state.themeOverrides = overrides;
-    applyTheme(preset, overrides);
+    state.themeOptions = options;
+    applyTheme(preset, overrides, options);
     syncThemeInputsWithActiveTheme();
     setThemeMessage("Theme loaded.", false);
   } catch (err) {
@@ -495,23 +514,26 @@ function onThemePresetChange() {
   if (state.themePreset !== "custom") {
     state.themeOverrides = {};
   }
-  applyTheme(state.themePreset, state.themeOverrides);
+  applyTheme(state.themePreset, state.themeOverrides, state.themeOptions);
   syncThemeInputsWithActiveTheme();
 }
 
 function onApplyTheme() {
   const preset = normalizeThemePresetName(elements.themePreset.value);
   const overrides = readThemeOverridesFromInputs();
+  const options = readThemeOptionsFromInputs();
   state.themePreset = preset;
   state.themeOverrides = overrides;
-  applyTheme(preset, overrides);
+  state.themeOptions = options;
+  applyTheme(preset, overrides, options);
   setThemeMessage("Theme applied locally.", false);
 }
 
 function onResetTheme() {
   state.themePreset = "forest";
   state.themeOverrides = {};
-  applyTheme("forest", {});
+  state.themeOptions = { ...themeDefaultOptions };
+  applyTheme("forest", {}, state.themeOptions);
   syncThemeInputsWithActiveTheme();
   setThemeMessage("Theme reset.", false);
 }
@@ -525,9 +547,11 @@ async function onSaveTheme(event) {
 
   const preset = normalizeThemePresetName(elements.themePreset.value);
   const overrides = readThemeOverridesFromInputs();
+  const options = readThemeOptionsFromInputs();
   state.themePreset = preset;
   state.themeOverrides = overrides;
-  applyTheme(preset, overrides);
+  state.themeOptions = options;
+  applyTheme(preset, overrides, options);
 
   try {
     const res = await fetch("/api/v1/settings/theme", {
@@ -537,6 +561,7 @@ async function onSaveTheme(event) {
       body: JSON.stringify({
         preset,
         variables: overrides,
+        options,
       }),
     });
     if (!res.ok) {
@@ -578,6 +603,24 @@ function sanitizeThemeOverridePayload(raw) {
   return output;
 }
 
+function sanitizeThemeOptionPayload(raw) {
+  const input = raw && typeof raw === "object" ? raw : {};
+  const output = { ...themeDefaultOptions };
+  const font = String(input.font || "").trim().toLowerCase();
+  if (font === "modern" || font === "serif" || font === "mono") {
+    output.font = font;
+  }
+  const density = String(input.density || "").trim().toLowerCase();
+  if (density === "comfortable" || density === "compact") {
+    output.density = density;
+  }
+  const corner = String(input.corner || "").trim().toLowerCase();
+  if (corner === "soft" || corner === "sharp") {
+    output.corner = corner;
+  }
+  return output;
+}
+
 function readThemeOverridesFromInputs() {
   const overrides = {
     bg: normalizeColorValue(elements.themeBg.value),
@@ -593,6 +636,14 @@ function readThemeOverridesFromInputs() {
     compact[key] = value;
   }
   return compact;
+}
+
+function readThemeOptionsFromInputs() {
+  return sanitizeThemeOptionPayload({
+    font: elements.themeFont.value,
+    density: elements.themeDensity.value,
+    corner: elements.themeCorner.value,
+  });
 }
 
 function normalizeColorValue(raw) {
@@ -611,11 +662,19 @@ function resolveThemeVariables(preset, overrides) {
   };
 }
 
-function applyTheme(preset, overrides) {
+function applyTheme(preset, overrides, options) {
   const variables = resolveThemeVariables(preset, overrides);
   for (const [key, value] of Object.entries(variables)) {
     document.documentElement.style.setProperty(`--${key}`, value);
   }
+  applyThemeOptions(options || themeDefaultOptions);
+}
+
+function applyThemeOptions(options) {
+  const opts = sanitizeThemeOptionPayload(options);
+  document.body.dataset.font = opts.font;
+  document.body.dataset.density = opts.density;
+  document.body.dataset.corner = opts.corner;
 }
 
 function syncThemeInputsWithActiveTheme() {
@@ -625,6 +684,9 @@ function syncThemeInputsWithActiveTheme() {
   elements.themePaper.value = active.paper || themePresets.forest.paper;
   elements.themeText.value = active.text || themePresets.forest.text;
   elements.themeBrand.value = active.brand || themePresets.forest.brand;
+  elements.themeFont.value = state.themeOptions.font || themeDefaultOptions.font;
+  elements.themeDensity.value = state.themeOptions.density || themeDefaultOptions.density;
+  elements.themeCorner.value = state.themeOptions.corner || themeDefaultOptions.corner;
 }
 
 function switchTimeline(type) {

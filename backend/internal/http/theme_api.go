@@ -33,16 +33,33 @@ var (
 		"sunset":   {},
 		"custom":   {},
 	}
+	allowedThemeOptionValues = map[string]map[string]struct{}{
+		"font": {
+			"modern": {},
+			"serif":  {},
+			"mono":   {},
+		},
+		"density": {
+			"comfortable": {},
+			"compact":     {},
+		},
+		"corner": {
+			"soft":  {},
+			"sharp": {},
+		},
+	}
 )
 
 type themeSettingsRequest struct {
 	Preset    string            `json:"preset"`
 	Variables map[string]string `json:"variables"`
+	Options   map[string]string `json:"options"`
 }
 
 type themeSettingsResponse struct {
 	Preset    string            `json:"preset"`
 	Variables map[string]string `json:"variables"`
+	Options   map[string]string `json:"options"`
 }
 
 func handleGetThemeSettings(deps Dependencies) http.HandlerFunc {
@@ -104,6 +121,11 @@ func handlePutThemeSettings(deps Dependencies) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		options, err := sanitizeThemeOptions(payload.Options)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 
 		variablesJSON, err := json.Marshal(variables)
 		if err != nil {
@@ -111,19 +133,27 @@ func handlePutThemeSettings(deps Dependencies) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
 			return
 		}
+		optionsJSON, err := json.Marshal(options)
+		if err != nil {
+			deps.Logger.Error("theme options marshal failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
+			return
+		}
 
 		if _, err := deps.PG.Exec(r.Context(), `
-INSERT INTO user_theme_settings (user_id, preset, variables_json, updated_at)
-VALUES ($1, $2, $3, now())
+INSERT INTO user_theme_settings (user_id, preset, variables_json, options_json, updated_at)
+VALUES ($1, $2, $3, $4, now())
 ON CONFLICT (user_id)
 DO UPDATE SET
   preset = EXCLUDED.preset,
   variables_json = EXCLUDED.variables_json,
+  options_json = EXCLUDED.options_json,
   updated_at = now()
 `,
 			principal.UserID,
 			preset,
 			variablesJSON,
+			optionsJSON,
 		); err != nil {
 			deps.Logger.Error("theme settings upsert failed", "error", err, "user_id", principal.UserID)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
@@ -133,6 +163,7 @@ DO UPDATE SET
 		writeJSON(w, http.StatusOK, themeSettingsResponse{
 			Preset:    preset,
 			Variables: variables,
+			Options:   options,
 		})
 	}
 }
@@ -141,19 +172,21 @@ func loadThemeSettings(ctx context.Context, deps Dependencies, userID int64) (th
 	var (
 		preset       string
 		variablesRaw []byte
+		optionsRaw   []byte
 	)
 	err := deps.PG.QueryRow(ctx, `
-SELECT preset, variables_json::text
+SELECT preset, variables_json::text, COALESCE(options_json, '{}'::jsonb)::text
 FROM user_theme_settings
 WHERE user_id = $1
 LIMIT 1
 `,
 		userID,
-	).Scan(&preset, &variablesRaw)
+	).Scan(&preset, &variablesRaw, &optionsRaw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return themeSettingsResponse{
 			Preset:    "forest",
 			Variables: map[string]string{},
+			Options:   defaultThemeOptions(),
 		}, nil
 	}
 	if err != nil {
@@ -170,10 +203,19 @@ LIMIT 1
 		_ = json.Unmarshal(variablesRaw, &variables)
 	}
 	variables, _ = sanitizeThemeVariables(variables)
+	var options map[string]string
+	if len(optionsRaw) > 0 {
+		_ = json.Unmarshal(optionsRaw, &options)
+	}
+	sanitizedOptions, err := sanitizeThemeOptions(options)
+	if err != nil {
+		sanitizedOptions = defaultThemeOptions()
+	}
 
 	return themeSettingsResponse{
 		Preset:    preset,
 		Variables: variables,
+		Options:   sanitizedOptions,
 	}, nil
 }
 
@@ -213,4 +255,36 @@ func sanitizeThemeVariables(input map[string]string) (map[string]string, error) 
 		out[key] = strings.ToLower(value)
 	}
 	return out, nil
+}
+
+func sanitizeThemeOptions(input map[string]string) (map[string]string, error) {
+	if len(input) == 0 {
+		return defaultThemeOptions(), nil
+	}
+	if len(input) > len(allowedThemeOptionValues) {
+		return nil, errors.New("too_many_theme_options")
+	}
+
+	out := defaultThemeOptions()
+	for key, value := range input {
+		key = strings.ToLower(strings.TrimSpace(key))
+		allowed, ok := allowedThemeOptionValues[key]
+		if !ok {
+			return nil, errors.New("invalid_theme_option_key")
+		}
+		value = strings.ToLower(strings.TrimSpace(value))
+		if _, ok := allowed[value]; !ok {
+			return nil, errors.New("invalid_theme_option_value")
+		}
+		out[key] = value
+	}
+	return out, nil
+}
+
+func defaultThemeOptions() map[string]string {
+	return map[string]string{
+		"font":    "modern",
+		"density": "comfortable",
+		"corner":  "soft",
+	}
 }

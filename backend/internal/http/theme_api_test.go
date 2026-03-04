@@ -51,3 +51,34 @@ func TestSanitizeThemeVariables(t *testing.T) {
 		t.Fatal("expected invalid color to fail")
 	}
 }
+
+func TestSanitizeThemeOptions(t *testing.T) {
+	t.Parallel()
+
+	opts, err := sanitizeThemeOptions(map[string]string{
+		"font":    "mono",
+		"density": "compact",
+		"corner":  "sharp",
+	})
+	if err != nil {
+		t.Fatalf("unexpected sanitize options error: %v", err)
+	}
+	if opts["font"] != "mono" || opts["density"] != "compact" || opts["corner"] != "sharp" {
+		t.Fatalf("unexpected options payload: %#v", opts)
+	}
+
+	defaulted, err := sanitizeThemeOptions(nil)
+	if err != nil {
+		t.Fatalf("unexpected default sanitize options error: %v", err)
+	}
+	if defaulted["font"] != "modern" || defaulted["density"] != "comfortable" || defaulted["corner"] != "soft" {
+		t.Fatalf("unexpected default options: %#v", defaulted)
+	}
+
+	if _, err := sanitizeThemeOptions(map[string]string{"nope": "x"}); err == nil {
+		t.Fatal("expected invalid key to fail")
+	}
+	if _, err := sanitizeThemeOptions(map[string]string{"font": "comic"}); err == nil {
+		t.Fatal("expected invalid value to fail")
+	}
+}

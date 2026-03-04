@@ -23,7 +23,7 @@ This repository is bootstrapped with:
 - Local groups API (`create/join/post/timeline`)
 - Notifications + basic moderation primitives (reports, domain policies)
 - Media upload + post attachments (`POST /api/v1/media`, attachment propagation in AP/local APIs)
-- Per-user custom theme settings (`GET/PUT /api/v1/settings/theme`)
+- Per-user custom theme settings (`GET/PUT /api/v1/settings/theme`) including colors, font style, density, and corner style
 - Modernized web UI wired to auth, posting, follows, groups, and notifications
 
 ## Quick start
