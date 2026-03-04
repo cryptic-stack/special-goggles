@@ -2,6 +2,10 @@ const state = {
   timeline: "local",
   username: "alice",
   authenticated: false,
+  timelinePaging: {
+    local: { nextMaxID: 0, hasMore: true, loading: false, initialized: false },
+    home: { nextMaxID: 0, hasMore: true, loading: false, initialized: false },
+  },
 };
 
 const elements = {
@@ -76,6 +80,7 @@ function init() {
   elements.homeBtn.addEventListener("click", () => switchTimeline("home"));
   elements.refreshBtn.addEventListener("click", () => refreshAll());
   elements.timelineList.addEventListener("click", onTimelineAction);
+  elements.timelineList.addEventListener("scroll", onTimelineScroll);
 
   elements.groupCreateForm.addEventListener("submit", onCreateGroup);
   elements.groupJoinForm.addEventListener("submit", onJoinGroup);
@@ -89,7 +94,8 @@ function init() {
 async function refreshAll() {
   await checkHealth();
   await loadAuthState();
-  await Promise.all([loadChecks(), loadProfile(), loadTimeline(), loadNotifications()]);
+  resetTimelinePaging(state.timeline);
+  await Promise.all([loadChecks(), loadProfile(), loadTimeline(true), loadNotifications()]);
 }
 
 async function checkHealth() {
@@ -269,7 +275,8 @@ async function onSubmitPost(event) {
     if (!res.ok) throw new Error(await safeErrorText(res));
     elements.postContent.value = "";
     setComposeMessage("Published.", false);
-    await Promise.all([loadProfile(), loadTimeline(), loadChecks(), loadNotifications()]);
+    resetTimelinePaging(state.timeline);
+    await Promise.all([loadProfile(), loadTimeline(true), loadChecks(), loadNotifications()]);
   } catch (err) {
     setComposeMessage(`Publish failed: ${err.message}`, true);
   } finally {
@@ -331,36 +338,94 @@ function setFollowMessage(text, isError) {
 }
 
 function switchTimeline(type) {
+  if (state.timeline !== type) {
+    resetTimelinePaging(type);
+  }
   state.timeline = type;
   elements.localBtn.classList.toggle("active", type === "local");
   elements.localBtn.setAttribute("aria-selected", String(type === "local"));
   elements.homeBtn.classList.toggle("active", type === "home");
   elements.homeBtn.setAttribute("aria-selected", String(type === "home"));
-  loadTimeline();
+  loadTimeline(true);
 }
 
-async function loadTimeline() {
+function resetTimelinePaging(mode) {
+  state.timelinePaging[mode] = {
+    nextMaxID: 0,
+    hasMore: true,
+    loading: false,
+    initialized: false,
+  };
+}
+
+async function loadTimeline(reset = false) {
+  const paging = state.timelinePaging[state.timeline];
+  if (!paging) {
+    return;
+  }
+
+  if (reset) {
+    resetTimelinePaging(state.timeline);
+    elements.timelineList.innerHTML = "";
+  }
+
+  const current = state.timelinePaging[state.timeline];
+  if (current.loading) {
+    return;
+  }
+  if (current.initialized && !current.hasMore) {
+    setTimelineState(`${state.timeline} timeline (end)`);
+    return;
+  }
+
   const username = encodeURIComponent(state.username || "alice");
-  const path = state.timeline === "home"
+  let path = state.timeline === "home"
     ? `/api/v1/timelines/home?username=${username}&limit=25`
     : "/api/v1/timelines/local?limit=25";
+  if (current.nextMaxID > 0) {
+    path += `&max_id=${encodeURIComponent(current.nextMaxID)}`;
+  }
 
-  setTimelineState("loading...");
+  current.loading = true;
+  setTimelineState(current.initialized ? "loading more..." : "loading...");
   try {
     const res = await fetch(path, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const payload = await res.json();
-    renderTimeline(Array.isArray(payload.items) ? payload.items : []);
-    setTimelineState(`${state.timeline} timeline`);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    renderTimeline(items, current.initialized);
+    current.initialized = true;
+    current.hasMore = Boolean(payload.has_more);
+    current.nextMaxID = Number(payload.next_max_id || 0);
+
+    if (!current.nextMaxID && current.hasMore && items.length > 0) {
+      current.nextMaxID = Number(items[items.length - 1].id || 0);
+    }
+
+    if (current.hasMore) {
+      setTimelineState(`${state.timeline} timeline`);
+    } else {
+      setTimelineState(`${state.timeline} timeline (end)`);
+    }
   } catch (err) {
-    elements.timelineList.innerHTML = "";
+    if (!current.initialized) {
+      elements.timelineList.innerHTML = "";
+    }
     setTimelineState(`error: ${err.message}`);
+  } finally {
+    current.loading = false;
+    if (current.hasMore) {
+      maybeAutoloadTimeline();
+    }
   }
 }
 
-function renderTimeline(items) {
-  elements.timelineList.innerHTML = "";
-  if (items.length === 0) {
+function renderTimeline(items, append) {
+  if (!append) {
+    elements.timelineList.innerHTML = "";
+  }
+
+  if (items.length === 0 && !append) {
     const li = document.createElement("li");
     li.className = "timeline-item";
     li.textContent = "No notices yet.";
@@ -391,6 +456,21 @@ function renderTimeline(items) {
   }
 }
 
+function onTimelineScroll() {
+  const list = elements.timelineList;
+  const nearBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 120;
+  if (nearBottom) {
+    loadTimeline(false);
+  }
+}
+
+function maybeAutoloadTimeline() {
+  const list = elements.timelineList;
+  if (list.scrollHeight <= list.clientHeight + 4) {
+    loadTimeline(false);
+  }
+}
+
 async function onTimelineAction(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -402,7 +482,8 @@ async function onTimelineAction(event) {
     if (action === "like") await postAction(`/api/v1/notes/${noteID}/like`, "POST");
     if (action === "boost") await postAction(`/api/v1/notes/${noteID}/boost`, "POST");
     if (action === "delete") await postAction(`/api/v1/posts/${noteID}`, "DELETE");
-    await Promise.all([loadTimeline(), loadNotifications()]);
+    resetTimelinePaging(state.timeline);
+    await Promise.all([loadTimeline(true), loadNotifications()]);
   } catch (err) {
     setTimelineState(`action failed: ${err.message}`);
   }

@@ -266,6 +266,7 @@ func handleHomeTimeline(deps Dependencies) http.HandlerFunc {
 		}
 
 		limit := timelineLimit(r.URL.Query().Get("limit"))
+		maxID := timelineMaxID(r.URL.Query().Get("max_id"))
 		rows, err := deps.PG.Query(r.Context(), `
 SELECT
   n.id,
@@ -279,10 +280,11 @@ FROM timeline_items t
 JOIN notes n ON n.id = t.note_id
 JOIN actors a ON a.id = n.actor_id
 WHERE t.user_actor_id = $1
+  AND ($2 = 0 OR n.id < $2)
 ORDER BY t.created_at DESC, n.id DESC
-LIMIT $2
+LIMIT $3
 `,
-			actor.ID, limit,
+			actor.ID, maxID, limit+1,
 		)
 		if err != nil {
 			deps.Logger.Error("query home timeline failed", "error", err, "actor_id", actor.ID)
@@ -291,13 +293,14 @@ LIMIT $2
 		}
 		defer rows.Close()
 
-		writeTimelineRows(w, rows)
+		writeTimelineRows(w, rows, limit)
 	}
 }
 
 func handleLocalTimeline(deps Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := timelineLimit(r.URL.Query().Get("limit"))
+		maxID := timelineMaxID(r.URL.Query().Get("max_id"))
 		rows, err := deps.PG.Query(r.Context(), `
 SELECT
   n.id,
@@ -310,10 +313,12 @@ SELECT
 FROM notes n
 JOIN actors a ON a.id = n.actor_id
 WHERE n.local = TRUE
+  AND ($1 = 0 OR n.id < $1)
 ORDER BY n.published_at DESC, n.id DESC
-LIMIT $1
+LIMIT $2
 `,
-			limit,
+			maxID,
+			limit+1,
 		)
 		if err != nil {
 			deps.Logger.Error("query local timeline failed", "error", err)
@@ -322,7 +327,7 @@ LIMIT $1
 		}
 		defer rows.Close()
 
-		writeTimelineRows(w, rows)
+		writeTimelineRows(w, rows, limit)
 	}
 }
 
@@ -410,12 +415,25 @@ func timelineLimit(raw string) int {
 	return limit
 }
 
+func timelineMaxID(raw string) int64 {
+	if raw == "" {
+		return 0
+	}
+	maxID, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || maxID <= 0 {
+		return 0
+	}
+	return maxID
+}
+
 func writeTimelineRows(w http.ResponseWriter, rows interface {
 	Next() bool
 	Scan(dest ...any) error
 	Err() error
-}) {
-	items := make([]map[string]any, 0)
+}, limit int) {
+	items := make([]map[string]any, 0, limit)
+	hasMore := false
+	var nextMaxID int64
 	for rows.Next() {
 		var (
 			noteID      int64
@@ -431,6 +449,11 @@ func writeTimelineRows(w http.ResponseWriter, rows interface {
 			return
 		}
 
+		if len(items) == limit {
+			hasMore = true
+			break
+		}
+
 		items = append(items, map[string]any{
 			"id":           noteID,
 			"note_url":     noteURL,
@@ -440,13 +463,19 @@ func writeTimelineRows(w http.ResponseWriter, rows interface {
 			"actor_url":    actorURL,
 			"username":     username,
 		})
+		nextMaxID = noteID
 	}
 	if err := rows.Err(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": items,
-	})
+	payload := map[string]any{
+		"items":    items,
+		"has_more": hasMore,
+	}
+	if hasMore && nextMaxID > 0 {
+		payload["next_max_id"] = nextMaxID
+	}
+	writeJSON(w, http.StatusOK, payload)
 }

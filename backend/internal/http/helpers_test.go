@@ -42,6 +42,32 @@ func TestIsSecureCookieEnv(t *testing.T) {
 	}
 }
 
+func TestTimelineMaxID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  int64
+	}{
+		{input: "", want: 0},
+		{input: "25", want: 25},
+		{input: "0", want: 0},
+		{input: "-5", want: 0},
+		{input: "abc", want: 0},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			got := timelineMaxID(tc.input)
+			if got != tc.want {
+				t.Fatalf("timelineMaxID(%q) = %d, want %d", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestIsUniqueViolation(t *testing.T) {
 	t.Parallel()
 

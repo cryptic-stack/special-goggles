@@ -317,6 +317,7 @@ func handleGroupTimeline(deps Dependencies) http.HandlerFunc {
 		}
 
 		limit := timelineLimit(r.URL.Query().Get("limit"))
+		maxID := timelineMaxID(r.URL.Query().Get("max_id"))
 		rows, err := deps.PG.Query(r.Context(), `
 SELECT
   n.id,
@@ -331,11 +332,13 @@ JOIN groups g ON g.id = gp.group_id
 JOIN notes n ON n.id = gp.note_id
 JOIN actors a ON a.id = n.actor_id
 WHERE g.slug = $1
+  AND ($2 = 0 OR n.id < $2)
 ORDER BY gp.created_at DESC, n.id DESC
-LIMIT $2
+LIMIT $3
 `,
 			slug,
-			limit,
+			maxID,
+			limit+1,
 		)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_server_error"})
@@ -343,6 +346,6 @@ LIMIT $2
 		}
 		defer rows.Close()
 
-		writeTimelineRows(w, rows)
+		writeTimelineRows(w, rows, limit)
 	}
 }
