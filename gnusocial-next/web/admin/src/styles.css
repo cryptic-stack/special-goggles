@@ -1,0 +1,36 @@
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: #11161d;
+  color: #d9e6ff;
+}
+
+.admin {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+h1,
+h2 {
+  margin: 0 0 0.5rem;
+}
+
+.card {
+  border: 1px solid #2f3b4f;
+  background: #1a2330;
+  border-radius: 10px;
+  padding: 0.8rem;
+  margin-top: 0.8rem;
+}
+
+pre {
+  white-space: pre-wrap;
+  max-height: 420px;
+  overflow: auto;
+}
+
+code {
+  color: #7ee17b;
+}
+
