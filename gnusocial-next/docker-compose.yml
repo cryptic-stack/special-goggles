@@ -1,0 +1,98 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - api
+      - frontend
+      - admin
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./infrastructure/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+  api:
+    build: ./services/api
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/gnusocial
+      DATABASE_USER: gnusocial
+      DATABASE_PASSWORD: password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      APP_REQUIRE_HTTPS: ${APP_REQUIRE_HTTPS:-false}
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: gnusocial
+      POSTGRES_USER: gnusocial
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+
+  federation-worker:
+    build: ./workers/federation-delivery
+    environment:
+      DATABASE_URL: postgresql://gnusocial:password@postgres:5432/gnusocial
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      STREAM_NAME: federation_delivery
+      CONSUMER_GROUP: federation_workers
+      CONSUMER_NAME: federation-worker-1
+      MAX_RETRIES: 8
+    depends_on:
+      - redis
+      - postgres
+
+  timeline-worker:
+    build: ./workers/timeline-fanout
+    environment:
+      DATABASE_URL: postgresql://gnusocial:password@postgres:5432/gnusocial
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      STREAM_NAME: timeline_events
+      CONSUMER_GROUP: timeline_workers
+      CONSUMER_NAME: timeline-worker-1
+    depends_on:
+      - redis
+      - postgres
+
+  media-worker:
+    build: ./workers/media-processing
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      STREAM_NAME: media_processing
+      CONSUMER_GROUP: media_workers
+      CONSUMER_NAME: media-worker-1
+      MEDIA_ROOT: /data/media
+    volumes:
+      - media-data:/data/media
+    depends_on:
+      - redis
+      - postgres
+
+  frontend:
+    build: ./web/frontend
+    environment:
+      VITE_API_BASE: /api
+    depends_on:
+      - api
+
+  admin:
+    build: ./web/admin
+    environment:
+      VITE_API_BASE: /api
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  media-data:
