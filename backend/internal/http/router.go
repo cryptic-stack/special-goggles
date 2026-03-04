@@ -46,6 +46,8 @@ func NewRouter(deps Dependencies) http.Handler {
 
 	mux.Handle("POST /api/v1/posts", handleCreatePost(deps))
 	mux.Handle("POST /api/v1/media", handleUploadMedia(deps))
+	mux.Handle("GET /api/v1/settings/theme", handleGetThemeSettings(deps))
+	mux.Handle("PUT /api/v1/settings/theme", handlePutThemeSettings(deps))
 	mux.Handle("DELETE /api/v1/posts/{id}", handleDeleteOwnPost(deps))
 	mux.Handle("GET /api/v1/timelines/home", handleHomeTimeline(deps))
 	mux.Handle("GET /api/v1/timelines/local", handleLocalTimeline(deps))

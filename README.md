@@ -23,6 +23,7 @@ This repository is bootstrapped with:
 - Local groups API (`create/join/post/timeline`)
 - Notifications + basic moderation primitives (reports, domain policies)
 - Media upload + post attachments (`POST /api/v1/media`, attachment propagation in AP/local APIs)
+- Per-user custom theme settings (`GET/PUT /api/v1/settings/theme`)
 - Modernized web UI wired to auth, posting, follows, groups, and notifications
 
 ## Quick start
@@ -64,6 +65,8 @@ Admin moderation endpoints are protected by `ADMIN_USERNAMES` (comma-separated u
 - `POST /api/v1/follows`
 - `POST /api/v1/unfollow`
 - `POST /api/v1/media`
+- `GET /api/v1/settings/theme`
+- `PUT /api/v1/settings/theme`
 - `POST /api/v1/notes/:id/like`
 - `DELETE /api/v1/notes/:id/like`
 - `POST /api/v1/notes/:id/boost`

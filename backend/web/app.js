@@ -2,6 +2,8 @@ const state = {
   timeline: "local",
   username: "alice",
   authenticated: false,
+  themePreset: "forest",
+  themeOverrides: {},
   timelinePaging: {
     local: { nextMaxID: 0, hasMore: true, loading: false, initialized: false },
     home: { nextMaxID: 0, hasMore: true, loading: false, initialized: false },
@@ -44,6 +46,17 @@ const elements = {
   unfollowBtn: document.getElementById("unfollowBtn"),
   followMsg: document.getElementById("followMsg"),
 
+  themeForm: document.getElementById("themeForm"),
+  themePreset: document.getElementById("themePreset"),
+  themeBg: document.getElementById("themeBg"),
+  themePaper: document.getElementById("themePaper"),
+  themeText: document.getElementById("themeText"),
+  themeBrand: document.getElementById("themeBrand"),
+  themeApplyBtn: document.getElementById("themeApplyBtn"),
+  themeResetBtn: document.getElementById("themeResetBtn"),
+  themeSaveBtn: document.getElementById("themeSaveBtn"),
+  themeMsg: document.getElementById("themeMsg"),
+
   localBtn: document.getElementById("localBtn"),
   homeBtn: document.getElementById("homeBtn"),
   refreshBtn: document.getElementById("refreshBtn"),
@@ -64,6 +77,53 @@ const elements = {
   markReadBtn: document.getElementById("markReadBtn"),
 };
 
+const themePresets = {
+  forest: {
+    bg: "#edf1ea",
+    paper: "#ffffff",
+    "paper-soft": "#f7f9f5",
+    line: "#d7ded3",
+    "line-strong": "#b7c4b0",
+    text: "#22332a",
+    muted: "#607365",
+    brand: "#5e9f4a",
+    "brand-deep": "#2e6f3b",
+    "brand-cool": "#2a6d80",
+    warn: "#a13d35",
+    ok: "#2e7a44",
+  },
+  midnight: {
+    bg: "#0f1824",
+    paper: "#162335",
+    "paper-soft": "#1b2b42",
+    line: "#2a3f5b",
+    "line-strong": "#3a5676",
+    text: "#dbe8f8",
+    muted: "#9fb4cf",
+    brand: "#5f97ff",
+    "brand-deep": "#3b6fd1",
+    "brand-cool": "#32b2c8",
+    warn: "#ff7c7c",
+    ok: "#58c88f",
+  },
+  sunset: {
+    bg: "#fff0e5",
+    paper: "#fff8f2",
+    "paper-soft": "#fff1e8",
+    line: "#f3c9b2",
+    "line-strong": "#e4a98a",
+    text: "#4a2f28",
+    muted: "#8c6458",
+    brand: "#dd6b35",
+    "brand-deep": "#b84b1f",
+    "brand-cool": "#8a5c42",
+    warn: "#c7442f",
+    ok: "#3f8a4a",
+  },
+};
+
+const themeEditableKeys = ["bg", "paper", "text", "brand"];
+
 init();
 
 function init() {
@@ -79,6 +139,11 @@ function init() {
   elements.followForm.addEventListener("submit", onFollow);
   elements.unfollowBtn.addEventListener("click", onUnfollow);
 
+  elements.themeForm.addEventListener("submit", onSaveTheme);
+  elements.themeApplyBtn.addEventListener("click", onApplyTheme);
+  elements.themeResetBtn.addEventListener("click", onResetTheme);
+  elements.themePreset.addEventListener("change", onThemePresetChange);
+
   elements.localBtn.addEventListener("click", () => switchTimeline("local"));
   elements.homeBtn.addEventListener("click", () => switchTimeline("home"));
   elements.refreshBtn.addEventListener("click", () => refreshAll());
@@ -91,6 +156,8 @@ function init() {
 
   elements.markReadBtn.addEventListener("click", onMarkRead);
 
+  applyTheme("forest", {});
+  syncThemeInputsWithActiveTheme();
   refreshAll();
 }
 
@@ -98,7 +165,7 @@ async function refreshAll() {
   await checkHealth();
   await loadAuthState();
   resetTimelinePaging(state.timeline);
-  await Promise.all([loadChecks(), loadProfile(), loadTimeline(true), loadNotifications()]);
+  await Promise.all([loadThemeSettings(), loadChecks(), loadProfile(), loadTimeline(true), loadNotifications()]);
 }
 
 async function checkHealth() {
@@ -125,11 +192,13 @@ async function loadAuthState() {
     elements.authState.className = "mono";
     elements.loginForm.style.display = "none";
     elements.registerForm.style.display = "none";
+    setThemeControlsEnabled(true);
   } catch {
     state.authenticated = false;
     elements.authState.textContent = "not signed in";
     elements.loginForm.style.display = "";
     elements.registerForm.style.display = "";
+    setThemeControlsEnabled(false);
   }
 }
 
@@ -379,6 +448,183 @@ async function onUnfollow() {
 function setFollowMessage(text, isError) {
   elements.followMsg.textContent = text;
   elements.followMsg.className = `msg ${isError ? "error" : "ok"}`;
+}
+
+function setThemeControlsEnabled(enabled) {
+  const disabled = !enabled;
+  elements.themePreset.disabled = disabled;
+  elements.themeBg.disabled = disabled;
+  elements.themePaper.disabled = disabled;
+  elements.themeText.disabled = disabled;
+  elements.themeBrand.disabled = disabled;
+  elements.themeApplyBtn.disabled = disabled;
+  elements.themeResetBtn.disabled = disabled;
+  elements.themeSaveBtn.disabled = disabled;
+}
+
+async function loadThemeSettings() {
+  if (!state.authenticated) {
+    state.themePreset = "forest";
+    state.themeOverrides = {};
+    applyTheme(state.themePreset, state.themeOverrides);
+    syncThemeInputsWithActiveTheme();
+    setThemeMessage("Sign in to save a personal theme.", false);
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/v1/settings/theme", { credentials: "same-origin" });
+    if (!res.ok) {
+      throw new Error(await safeErrorText(res));
+    }
+    const payload = await res.json();
+    const preset = normalizeThemePresetName(payload.preset);
+    const overrides = sanitizeThemeOverridePayload(payload.variables);
+    state.themePreset = preset;
+    state.themeOverrides = overrides;
+    applyTheme(preset, overrides);
+    syncThemeInputsWithActiveTheme();
+    setThemeMessage("Theme loaded.", false);
+  } catch (err) {
+    setThemeMessage(`Theme load failed: ${err.message}`, true);
+  }
+}
+
+function onThemePresetChange() {
+  state.themePreset = normalizeThemePresetName(elements.themePreset.value);
+  if (state.themePreset !== "custom") {
+    state.themeOverrides = {};
+  }
+  applyTheme(state.themePreset, state.themeOverrides);
+  syncThemeInputsWithActiveTheme();
+}
+
+function onApplyTheme() {
+  const preset = normalizeThemePresetName(elements.themePreset.value);
+  const overrides = readThemeOverridesFromInputs();
+  state.themePreset = preset;
+  state.themeOverrides = overrides;
+  applyTheme(preset, overrides);
+  setThemeMessage("Theme applied locally.", false);
+}
+
+function onResetTheme() {
+  state.themePreset = "forest";
+  state.themeOverrides = {};
+  applyTheme("forest", {});
+  syncThemeInputsWithActiveTheme();
+  setThemeMessage("Theme reset.", false);
+}
+
+async function onSaveTheme(event) {
+  event.preventDefault();
+  if (!state.authenticated) {
+    setThemeMessage("Sign in to save a personal theme.", true);
+    return;
+  }
+
+  const preset = normalizeThemePresetName(elements.themePreset.value);
+  const overrides = readThemeOverridesFromInputs();
+  state.themePreset = preset;
+  state.themeOverrides = overrides;
+  applyTheme(preset, overrides);
+
+  try {
+    const res = await fetch("/api/v1/settings/theme", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        preset,
+        variables: overrides,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(await safeErrorText(res));
+    }
+    setThemeMessage("Theme saved.", false);
+  } catch (err) {
+    setThemeMessage(`Theme save failed: ${err.message}`, true);
+  }
+}
+
+function setThemeMessage(text, isError) {
+  elements.themeMsg.textContent = text;
+  elements.themeMsg.className = `msg ${isError ? "error" : "ok"}`;
+}
+
+function normalizeThemePresetName(raw) {
+  const preset = String(raw || "").trim().toLowerCase();
+  if (themePresets[preset] || preset === "custom") {
+    return preset;
+  }
+  return "forest";
+}
+
+function sanitizeThemeOverridePayload(raw) {
+  const input = raw && typeof raw === "object" ? raw : {};
+  const output = {};
+  for (const [key, value] of Object.entries(input)) {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (!themeEditableKeys.includes(normalizedKey)) {
+      continue;
+    }
+    const normalizedValue = normalizeColorValue(value);
+    if (!normalizedValue) {
+      continue;
+    }
+    output[normalizedKey] = normalizedValue;
+  }
+  return output;
+}
+
+function readThemeOverridesFromInputs() {
+  const overrides = {
+    bg: normalizeColorValue(elements.themeBg.value),
+    paper: normalizeColorValue(elements.themePaper.value),
+    text: normalizeColorValue(elements.themeText.value),
+    brand: normalizeColorValue(elements.themeBrand.value),
+  };
+  const compact = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    if (!value) {
+      continue;
+    }
+    compact[key] = value;
+  }
+  return compact;
+}
+
+function normalizeColorValue(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(value)) {
+    return value;
+  }
+  return "";
+}
+
+function resolveThemeVariables(preset, overrides) {
+  const basePreset = themePresets[preset] || themePresets.forest;
+  return {
+    ...basePreset,
+    ...overrides,
+  };
+}
+
+function applyTheme(preset, overrides) {
+  const variables = resolveThemeVariables(preset, overrides);
+  for (const [key, value] of Object.entries(variables)) {
+    document.documentElement.style.setProperty(`--${key}`, value);
+  }
+}
+
+function syncThemeInputsWithActiveTheme() {
+  elements.themePreset.value = state.themePreset;
+  const active = resolveThemeVariables(state.themePreset, state.themeOverrides);
+  elements.themeBg.value = active.bg || themePresets.forest.bg;
+  elements.themePaper.value = active.paper || themePresets.forest.paper;
+  elements.themeText.value = active.text || themePresets.forest.text;
+  elements.themeBrand.value = active.brand || themePresets.forest.brand;
 }
 
 function switchTimeline(type) {

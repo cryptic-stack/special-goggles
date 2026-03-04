@@ -92,6 +92,33 @@
         </form>
         <p id="followMsg" class="msg"></p>
       </section>
+
+      <section class="panel">
+        <p class="panel-title">Theme</p>
+        <form id="themeForm" class="stacked-form">
+          <label for="themePreset">Preset</label>
+          <select id="themePreset">
+            <option value="forest">Forest</option>
+            <option value="midnight">Midnight</option>
+            <option value="sunset">Sunset</option>
+            <option value="custom">Custom</option>
+          </select>
+          <label for="themeBg">Background</label>
+          <input id="themeBg" type="color" value="#edf1ea">
+          <label for="themePaper">Panel</label>
+          <input id="themePaper" type="color" value="#ffffff">
+          <label for="themeText">Text</label>
+          <input id="themeText" type="color" value="#22332a">
+          <label for="themeBrand">Brand</label>
+          <input id="themeBrand" type="color" value="#5e9f4a">
+          <div class="row">
+            <button id="themeApplyBtn" type="button">Apply</button>
+            <button id="themeResetBtn" type="button" class="ghost">Reset</button>
+          </div>
+          <button id="themeSaveBtn" type="submit">Save Theme</button>
+        </form>
+        <p id="themeMsg" class="msg"></p>
+      </section>
     </aside>
 
     <section class="feed" data-reveal>
