@@ -102,3 +102,4 @@ Admin moderation endpoints are protected by `ADMIN_USERNAMES` (comma-separated u
 
 - See `GAP_ANALYSIS.md` for current feature parity and implementation priorities.
 - See `ROADMAP_X_PARITY.md` for detailed X/Twitter gap-closure implementation milestones.
+- See `GAP_ANALYSIS_FACEBOOK_POST_CONTROLS.md` and `ROADMAP_FACEBOOK_POST_CONTROLS.md` for Facebook-style posting/feed-control gap and rollout plan.
