@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ui-bg: 12 14 18;
+  --ui-surface: 20 24 31;
+  --ui-panel: 24 29 37;
+  --ui-line: 47 57 72;
+  --ui-text: 224 234 250;
+  --ui-muted: 152 169 196;
+  --ui-accent: 97 206 137;
+}
+
+html[data-density="comfortable"] {
+  --density-post-padding: 20px;
+}
+
+html[data-density="default"] {
+  --density-post-padding: 16px;
+}
+
+html[data-density="compact"] {
+  --density-post-padding: 12px;
+}
+
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] *::before,
+html[data-reduced-motion="true"] *::after {
+  animation-duration: 0ms !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top right, rgba(34, 46, 63, 0.45), rgb(var(--ui-bg)));
+  color: rgb(var(--ui-text));
+}
+
+*:focus-visible {
+  outline: 2px solid rgb(var(--ui-accent));
+  outline-offset: 2px;
+}
